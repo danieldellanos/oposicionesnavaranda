@@ -97,7 +97,7 @@
     "ioswebviewscheme": "moodleappfs",
     "appstores": {
         "android": "com.oposicionesnavaranda.mobile",
-        "ios": "id6742312240"
+        "ios": "id6743129735"
     },
     "wsrequestqueuelimit": 10,
     "wsrequestqueuedelay": 100,
