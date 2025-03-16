@@ -78,7 +78,7 @@
     "customurlscheme": "oposicionesnavaranda",
     "sites": [
         {
-            "url": "https://oposicionesnavaranda.es/",
+            "url": "https://aulavirtual.oposicionesnavaranda.es",
             "name": "Oposiciones Navaranda",
             "staging": false
         }
