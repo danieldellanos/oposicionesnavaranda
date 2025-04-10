@@ -81,6 +81,11 @@
             "url": "https://aulavirtual.oposicionesnavaranda.es",
             "name": "Oposiciones Navaranda",
             "staging": false
+        },
+        {
+            "url": "https://aulavirtual.opositoreslideres.com",
+            "name": "Opositores Líderes",
+            "staging": false
         }
     ],
     "sitename": "Oposiciones Navaranda",
