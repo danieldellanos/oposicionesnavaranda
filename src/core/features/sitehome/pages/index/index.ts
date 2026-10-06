@@ -12,26 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 
 import { CoreSite, CoreSiteConfig } from '@classes/sites/site';
 import { CoreCourse, CoreCourseWSSection, sectionContentIsModule } from '@features/course/services/course';
-import { CoreDomUtils } from '@services/utils/dom';
 import { CoreSites } from '@services/sites';
 import { CoreSiteHome } from '@features/sitehome/services/sitehome';
 import { CoreCourses } from '@features//courses/services/courses';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { CoreEventObserver, CoreEvents } from '@static/events';
 import { CoreCourseHelper, CoreCourseModuleData } from '@features/course/services/course-helper';
 import { CoreCourseModuleDelegate } from '@features/course/services/module-delegate';
 import { CoreCourseModulePrefetchDelegate } from '@features/course/services/module-prefetch-delegate';
 import { CoreNavigationOptions, CoreNavigator } from '@services/navigator';
 import { CoreBlockHelper } from '@features/block/services/block-helper';
-import { CoreUtils } from '@services/utils/utils';
-import { CoreTime } from '@singletons/time';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreTime } from '@static/time';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
 import { ContextLevel } from '@/core/constants';
-import { CoreModals } from '@services/modals';
+import { CoreModals } from '@services/overlays/modals';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { Translate } from '@singletons';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreCourseModuleComponent } from '../../../course/components/module/module';
+import { CoreBlockSideBlocksButtonComponent } from '../../../block/components/side-blocks-button/side-blocks-button';
+import { Subscription } from 'rxjs';
+import { CoreBlockDelegate } from '@features/block/services/block-delegate';
 
 /**
  * Page that displays site home index.
@@ -39,9 +45,14 @@ import { CoreModals } from '@services/modals';
 @Component({
     selector: 'page-core-sitehome-index',
     templateUrl: 'index.html',
-    styleUrls: ['index.scss'],
+    styleUrl: 'index.scss',
+    imports: [
+        CoreSharedModule,
+        CoreCourseModuleComponent,
+        CoreBlockSideBlocksButtonComponent,
+    ],
 })
-export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
+export default class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
 
     dataLoaded = false;
     section?: CoreCourseWSSection & {
@@ -58,16 +69,19 @@ export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
     isModule = sectionContentIsModule;
 
     protected updateSiteObserver: CoreEventObserver;
+    protected blockSubscription: Subscription;
+    protected routeSubscription?: Subscription;
     protected logView: () => void;
+    protected route = inject(ActivatedRoute);
 
-    constructor(protected route: ActivatedRoute) {
+    constructor() {
         // Refresh the enabled flags if site is updated.
         this.updateSiteObserver = CoreEvents.on(CoreEvents.SITE_UPDATED, () => {
             this.searchEnabled = !CoreCourses.isSearchCoursesDisabledInSite();
         }, CoreSites.getCurrentSiteId());
 
         this.logView = CoreTime.once(async () => {
-            await CoreUtils.ignoreErrors(CoreCourse.logView(this.siteHomeId));
+            await CorePromiseUtils.ignoreErrors(CoreCourse.logView(this.siteHomeId));
 
             CoreAnalytics.logEvent({
                 type: CoreAnalyticsEventType.VIEW_ITEM,
@@ -76,6 +90,11 @@ export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
                 data: { id: this.siteHomeId, category: 'course' },
                 url: '/?redirect=0',
             });
+        });
+
+        // Re-evaluate if blocks are supported if the list of handlers changed (e.g. site plugins added).
+        this.blockSubscription = CoreBlockDelegate.blocksUpdateObservable.subscribe(async (): Promise<void> => {
+            this.hasBlocks = await CoreBlockHelper.hasCourseBlocks(this.siteHomeId);
         });
     }
 
@@ -100,7 +119,9 @@ export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
 
         this.openFocusedInstance();
 
-        this.route.queryParams.subscribe(() => this.openFocusedInstance());
+        this.routeSubscription = this.route.queryParams.subscribe(() => {
+            CorePromiseUtils.ignoreErrors(this.openFocusedInstance());
+        });
     }
 
     /**
@@ -137,8 +158,12 @@ export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
             const sections = await CoreCourse.getSections(this.siteHomeId, false, true);
 
             // Check "Include a topic section" setting from numsections.
-            this.section = config.numsections ? sections.find((section) => section.section == 1) : undefined;
+            this.section = config.numsections ? sections.find((section) => section.section === 1) : undefined;
             if (this.section) {
+                // If section name is 'Site', set it to empty string. This is the value set by the WS when the name is empty.
+                this.section.name = (this.section.name === 'Site' || this.section.name === Translate.instant('core.site')) ?
+                    '' : this.section.name.trim();
+
                 const result = await CoreCourseHelper.addHandlerDataForModules(
                     [this.section],
                     this.siteHomeId,
@@ -153,7 +178,7 @@ export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
 
             this.logView();
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'core.course.couldnotloadsectioncontent', true);
+            CoreAlerts.showError(error, { default: Translate.instant('core.course.couldnotloadsectioncontent') });
         }
 
         this.hasBlocks = await CoreBlockHelper.hasCourseBlocks(this.siteHomeId);
@@ -226,6 +251,8 @@ export class CoreSiteHomeIndexPage implements OnInit, OnDestroy {
      */
     ngOnDestroy(): void {
         this.updateSiteObserver.off();
+        this.blockSubscription.unsubscribe();
+        this.routeSubscription?.unsubscribe();
     }
 
     /**

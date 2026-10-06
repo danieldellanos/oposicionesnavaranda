@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { CoreNavigator } from '@services/navigator';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Page that displays a loading and then opens the main menu again.
@@ -21,13 +22,19 @@ import { CoreNavigator } from '@services/navigator';
 @Component({
     selector: 'page-core-mainmenu-reload',
     templateUrl: 'reload.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class CoreMainMenuReloadPage implements OnInit {
+export default class CoreMainMenuReloadPage {
 
     /**
-     * @inheritdoc
+     * Runs when the page has fully entered and is now the active page.
+     * This event will fire, whether it was the first load or a cached page.
+     *
+     * This is not done on the ngOnInit because it can happen the page is revisited before destroyed.
      */
-    ngOnInit(): void {
+    ionViewDidEnter(): void {
         CoreNavigator.navigate('/main', {
             reset: true,
         });

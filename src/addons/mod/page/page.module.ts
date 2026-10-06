@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { APP_INITIALIZER, NgModule } from '@angular/core';
+import { NgModule, provideAppInitializer } from '@angular/core';
 import { Routes } from '@angular/router';
 import { CoreContentLinksDelegate } from '@features/contentlinks/services/contentlinks-delegate';
 import { CoreCourseModuleDelegate } from '@features/course/services/module-delegate';
@@ -25,11 +25,13 @@ import { AddonModPageModuleHandler } from './services/handlers/module';
 import { AddonModPagePluginFileHandler } from './services/handlers/pluginfile';
 import { AddonModPagePrefetchHandler } from './services/handlers/prefetch';
 import { ADDON_MOD_PAGE_PAGE_NAME } from './constants';
+import { CoreCourseForceLanguageSource } from '@features/course/constants';
 
 const routes: Routes = [
     {
-        path: ADDON_MOD_PAGE_PAGE_NAME,
-        loadChildren: () => import('./page-lazy.module'),
+        path: `${ADDON_MOD_PAGE_PAGE_NAME}/:courseId/:cmId`,
+        loadComponent: () => import('./pages/index/index'),
+        data: { checkForcedLanguage: CoreCourseForceLanguageSource.MODULE },
     },
 ];
 
@@ -38,17 +40,13 @@ const routes: Routes = [
         CoreMainMenuTabRoutingModule.forChild(routes),
     ],
     providers: [
-        {
-            provide: APP_INITIALIZER,
-            multi: true,
-            useValue: () => {
-                CoreCourseModuleDelegate.registerHandler(AddonModPageModuleHandler.instance);
-                CoreContentLinksDelegate.registerHandler(AddonModPageIndexLinkHandler.instance);
-                CoreContentLinksDelegate.registerHandler(AddonModPageListLinkHandler.instance);
-                CoreCourseModulePrefetchDelegate.registerHandler(AddonModPagePrefetchHandler.instance);
-                CorePluginFileDelegate.registerHandler(AddonModPagePluginFileHandler.instance);
-            },
-        },
+        provideAppInitializer(() => {
+            CoreCourseModuleDelegate.registerHandler(AddonModPageModuleHandler.instance);
+            CoreContentLinksDelegate.registerHandler(AddonModPageIndexLinkHandler.instance);
+            CoreContentLinksDelegate.registerHandler(AddonModPageListLinkHandler.instance);
+            CoreCourseModulePrefetchDelegate.registerHandler(AddonModPagePrefetchHandler.instance);
+            CorePluginFileDelegate.registerHandler(AddonModPagePluginFileHandler.instance);
+        }),
     ],
 })
 export class AddonModPageModule {}

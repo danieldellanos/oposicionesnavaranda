@@ -14,20 +14,26 @@
 
 import { Injectable } from '@angular/core';
 import {
-    AddonMessagesProvider,
     AddonMessages,
 } from '../messages';
-import { CoreMainMenuHandler, CoreMainMenuHandlerToDisplay } from '@features/mainmenu/services/mainmenu-delegate';
+import { CoreMainMenuHandler, CoreMainMenuPageNavHandlerData } from '@features/mainmenu/services/mainmenu-delegate';
 import { CoreCronHandler } from '@services/cron';
 import { CoreSites } from '@services/sites';
-import { CoreEvents } from '@singletons/events';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreEvents } from '@static/events';
+import { CoreUtils } from '@static/utils';
 import {
     CorePushNotificationsNotificationBasicData,
 } from '@features/pushnotifications/services/pushnotifications';
 import { CorePushNotificationsDelegate } from '@features/pushnotifications/services/push-delegate';
 import { makeSingleton } from '@singletons';
-import { CoreMainMenuProvider } from '@features/mainmenu/services/mainmenu';
+import {
+    ADDON_MESSAGES_UNREAD_CONVERSATION_COUNTS_EVENT,
+    ADDON_MESSAGES_CONTACT_REQUESTS_COUNT_EVENT,
+    ADDON_MESSAGES_PAGE_NAME,
+    ADDONS_MESSAGES_MENU_FEATURE_NAME,
+    ADDONS_MESSAGES_COMPONENT_NAME,
+} from '@addons/messages/constants';
+import { MAIN_MENU_HANDLER_BADGE_UPDATED_EVENT } from '@features/mainmenu/constants';
 
 /**
  * Handler to inject an option into main menu.
@@ -35,15 +41,13 @@ import { CoreMainMenuProvider } from '@features/mainmenu/services/mainmenu';
 @Injectable({ providedIn: 'root' })
 export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler, CoreCronHandler {
 
-    static readonly PAGE_NAME = 'messages';
-
-    name = 'AddonMessages';
+    name = ADDONS_MESSAGES_COMPONENT_NAME;
     priority = 700;
 
-    protected handler: CoreMainMenuHandlerToDisplay = {
+    protected handler: CoreMainMenuPageNavHandlerData = {
         icon: 'fas-comments',
         title: 'addon.messages.messages',
-        page: AddonMessagesMainMenuHandlerService.PAGE_NAME,
+        page: ADDON_MESSAGES_PAGE_NAME,
         class: 'addon-messages-handler',
         showBadge: true,
         badge: '',
@@ -58,14 +62,14 @@ export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler,
 
     constructor() {
 
-        CoreEvents.on(AddonMessagesProvider.UNREAD_CONVERSATION_COUNTS_EVENT, (data) => {
+        CoreEvents.on(ADDON_MESSAGES_UNREAD_CONVERSATION_COUNTS_EVENT, (data) => {
             this.unreadCount = data.favourites + data.individual + data.group + data.self;
             this.orMore = !!data.orMore;
 
             data.siteId && this.updateBadge(data.siteId);
         });
 
-        CoreEvents.on(AddonMessagesProvider.CONTACT_REQUESTS_COUNT_EVENT, (data) => {
+        CoreEvents.on(ADDON_MESSAGES_CONTACT_REQUESTS_COUNT_EVENT, (data) => {
             this.contactRequestsCount = data.count;
 
             data.siteId && this.updateBadge(data.siteId);
@@ -110,7 +114,7 @@ export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler,
      *
      * @returns Data needed to render the handler.
      */
-    getDisplayData(): CoreMainMenuHandlerToDisplay {
+    getDisplayData(): CoreMainMenuPageNavHandlerData {
         if (this.handler.loading) {
             this.refreshBadge();
         }
@@ -122,10 +126,9 @@ export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler,
      * Refreshes badge number.
      *
      * @param siteId Site ID or current Site if undefined.
-     * @param unreadOnly If true only the unread conversations count is refreshed.
      * @returns Resolve when done.
      */
-    async refreshBadge(siteId?: string, unreadOnly?: boolean): Promise<void> {
+    async refreshBadge(siteId?: string): Promise<void> {
         const badgeSiteId = siteId || CoreSites.getCurrentSiteId();
 
         if (!badgeSiteId) {
@@ -139,12 +142,10 @@ export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler,
             this.orMore = false;
         }));
 
-        // Refresh the number of contact requests in 3.6+ sites.
-        if (!unreadOnly && AddonMessages.isGroupMessagingEnabled()) {
-            promises.push(AddonMessages.refreshContactRequestsCount(badgeSiteId).catch(() => {
-                this.contactRequestsCount = 0;
-            }));
-        }
+        // Refresh the number of contact requests.
+        promises.push(AddonMessages.refreshContactRequestsCount(badgeSiteId).catch(() => {
+            this.contactRequestsCount = 0;
+        }));
 
         await Promise.all(promises).finally(() => {
             this.updateBadge(badgeSiteId);
@@ -174,7 +175,7 @@ export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler,
 
         // Update push notifications badge.
         CoreEvents.trigger(
-            CoreMainMenuProvider.MAIN_MENU_HANDLER_BADGE_UPDATED,
+            MAIN_MENU_HANDLER_BADGE_UPDATED_EVENT,
             {
                 handler: AddonMessagesMainMenuHandlerService.name,
                 value: totalCount,
@@ -193,11 +194,12 @@ export class AddonMessagesMainMenuHandlerService implements CoreMainMenuHandler,
     async execute(siteId?: string): Promise<void> {
         const site = CoreSites.getCurrentSite();
 
+        const enabled = await this.isEnabled();
         if (
             !CoreSites.isCurrentSite(siteId) ||
             !site ||
-            site.isFeatureDisabled('CoreMainMenuDelegate_AddonMessages') ||
-            !site.canUseAdvancedFeature('messaging')
+            site.isFeatureDisabled(ADDONS_MESSAGES_MENU_FEATURE_NAME) ||
+            !enabled
         ) {
             return;
         }

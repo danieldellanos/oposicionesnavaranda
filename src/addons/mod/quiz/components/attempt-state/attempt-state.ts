@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 import { AddonModQuiz } from '../../services/quiz';
 import { toBoolean } from '@/core/transforms/boolean';
+import { CoreSharedModule } from '@/core/shared.module';
+import { AddonModQuizAttemptStates } from '../../constants';
 
 /**
  * Component that displays an attempt state.
@@ -22,22 +24,17 @@ import { toBoolean } from '@/core/transforms/boolean';
 @Component({
     selector: 'addon-mod-quiz-attempt-state',
     templateUrl: 'attempt-state.html',
-    styleUrls: ['attempt-state.scss'],
+    styleUrl: 'attempt-state.scss',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class AddonModQuizAttemptStateComponent implements OnChanges {
+export class AddonModQuizAttemptStateComponent {
 
-    @Input() state = '';
-    @Input({ transform: toBoolean }) finishedOffline = false;
+    readonly state = input<AddonModQuizAttemptStates>();
+    readonly finishedOffline = input(false, { transform: toBoolean });
 
-    readableState = '';
-    color = '';
-
-    /**
-     * @inheritdoc
-     */
-    async ngOnChanges(): Promise<void> {
-        this.readableState = AddonModQuiz.getAttemptReadableStateName(this.state, this.finishedOffline);
-        this.color = AddonModQuiz.getAttemptStateColor(this.state, this.finishedOffline);
-    }
+    readonly readableState = computed(() => AddonModQuiz.getAttemptReadableStateName(this.state(), this.finishedOffline()));
+    readonly color = computed(() => AddonModQuiz.getAttemptStateColor(this.state(), this.finishedOffline()));
 
 }

@@ -19,30 +19,33 @@ import { MediaFile, CaptureError, CaptureVideoOptions } from '@awesome-cordova-p
 import { Subject } from 'rxjs';
 
 import { CoreFile, CoreFileProvider } from '@services/file';
+import { CoreFileUtils } from '@static/file-utils';
 import { CoreFilepool } from '@services/filepool';
 import { CoreSites } from '@services/sites';
-import { CoreMimetypeUtils } from '@services/utils/mimetype';
-import { CoreTimeUtils } from '@services/utils/time';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreMimetype } from '@static/mimetype';
+import { CoreTime } from '@static/time';
+import { CoreUtils } from '@static/utils';
 import { CoreWSFile, CoreWSFileUploadOptions, CoreWSUploadFileResult } from '@services/ws';
 import { makeSingleton, Translate, MediaCapture, Camera } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { CoreError } from '@classes/errors/error';
 import { CoreSite } from '@classes/sites/site';
 import { CoreFileEntry, CoreFileHelper } from '@services/file-helper';
-import { CorePath } from '@singletons/path';
+import { CorePath } from '@static/path';
 import { CorePlatform } from '@services/platform';
-import { CoreModals } from '@services/modals';
+import { CoreModals } from '@services/overlays/modals';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreBytesConstants } from '@/core/constants';
 
 /**
  * File upload options.
  */
-export interface CoreFileUploaderOptions extends CoreWSFileUploadOptions {
+export type CoreFileUploaderOptions = CoreWSFileUploadOptions & {
     /**
      * Whether the file should be deleted after the upload (if success).
      */
     deleteAfterUpload?: boolean;
-}
+};
 
 /**
  * Service to upload files.
@@ -50,8 +53,8 @@ export interface CoreFileUploaderOptions extends CoreWSFileUploadOptions {
 @Injectable({ providedIn: 'root' })
 export class CoreFileUploaderProvider {
 
-    static readonly LIMITED_SIZE_WARNING = 1048576; // 1 MB.
-    static readonly WIFI_SIZE_WARNING = 10485760; // 10 MB.
+    static readonly LIMITED_SIZE_WARNING = CoreBytesConstants.MEGABYTE;
+    static readonly WIFI_SIZE_WARNING = CoreBytesConstants.MEGABYTE * 10;
 
     protected logger: CoreLogger;
 
@@ -71,7 +74,7 @@ export class CoreFileUploaderProvider {
      * @returns Treated extension.
      */
     protected addDot(extension: string): string {
-        return '.' + extension;
+        return `.${extension}`;
     }
 
     /**
@@ -111,7 +114,7 @@ export class CoreFileUploaderProvider {
             const site = await CoreSites.getSite(siteId);
 
             return this.canDeleteDraftFilesInSite(site);
-        } catch (error) {
+        } catch {
             return false;
         }
     }
@@ -130,6 +133,15 @@ export class CoreFileUploaderProvider {
     }
 
     /**
+     * Check whether the in-app audio recorder can be used.
+     *
+     * @returns Whether the in-app audio recorder can be used.
+     */
+    canUseInAppAudioRecorder(): boolean {
+        return CorePlatform.supportsMediaCapture() && CorePlatform.supportsWebAssembly();
+    }
+
+    /**
      * Start the audio recorder application and return information about captured audio clip files.
      *
      * @returns Promise resolved with the result.
@@ -138,7 +150,7 @@ export class CoreFileUploaderProvider {
         this.onAudioCapture.next(true);
 
         try {
-            if (!CorePlatform.supportsMediaCapture() || !CorePlatform.supportsWebAssembly()) {
+            if (!this.canUseInAppAudioRecorder()) {
                 const media = await MediaCapture.captureAudio({ limit: 1 });
 
                 return media;
@@ -234,20 +246,20 @@ export class CoreFileUploaderProvider {
      * @returns Options.
      */
     getCameraUploadOptions(uri: string, isFromAlbum?: boolean): CoreFileUploaderOptions {
-        const extension = CoreMimetypeUtils.guessExtensionFromUrl(uri);
-        const mimetype = CoreMimetypeUtils.getMimeType(extension);
+        const extension = CoreMimetype.guessExtensionFromUrl(uri);
+        const mimetype = CoreMimetype.getMimeType(extension);
         const isIOS = CorePlatform.isIOS();
         const options: CoreFileUploaderOptions = {
             deleteAfterUpload: !isFromAlbum,
             mimeType: mimetype,
         };
-        const fileName = CoreFile.getFileAndDirectoryFromPath(uri).name;
+        const fileName = CoreFileUtils.getFileAndDirectoryFromPath(uri).name;
 
         if (isIOS && (mimetype == 'image/jpeg' || mimetype == 'image/png')) {
             // In iOS, the pictures can have repeated names, even if they come from the album.
             // Add a timestamp to the filename to make it unique.
             const split = fileName.split('.');
-            split[0] += '_' + CoreTimeUtils.readableTimestamp();
+            split[0] += `_${CoreTime.readableTimestamp()}`;
 
             options.fileName = split.join('.');
         } else {
@@ -285,7 +297,7 @@ export class CoreFileUploaderProvider {
 
         originalFiles.forEach((file) => {
             const stillInList = currentFiles.some((currentFile) =>
-                CoreFileHelper.getFileUrl(<CoreWSFile> currentFile) == CoreFileHelper.getFileUrl(file));
+                CoreFileHelper.getFileUrl(<CoreWSFile> currentFile) === CoreFileHelper.getFileUrl(file));
 
             if (!stillInList) {
                 filesToDelete.push({
@@ -319,8 +331,8 @@ export class CoreFileUploaderProvider {
     ): CoreFileUploaderOptions {
         const options: CoreFileUploaderOptions = {};
         options.fileName = name;
-        options.mimeType = mimetype || CoreMimetypeUtils.getMimeType(
-            CoreMimetypeUtils.getFileExtension(options.fileName),
+        options.mimeType = mimetype || CoreMimetype.getMimeType(
+            CoreMimetype.getFileExtension(options.fileName),
         );
         options.deleteAfterUpload = !!deleteAfterUpload;
         options.itemId = itemId || 0;
@@ -342,7 +354,7 @@ export class CoreFileUploaderProvider {
         if (!filename.match(/_\d{14}(\..*)?$/)) {
             // Add a timestamp to the filename to make it unique.
             const split = filename.split('.');
-            split[0] += '_' + CoreTimeUtils.readableTimestamp();
+            split[0] += `_${CoreTime.readableTimestamp()}`;
             filename = split.join('.');
         }
 
@@ -351,8 +363,8 @@ export class CoreFileUploaderProvider {
         if (mediaFile.type) {
             options.mimeType = mediaFile.type;
         } else {
-            options.mimeType = CoreMimetypeUtils.getMimeType(
-                CoreMimetypeUtils.getFileExtension(options.fileName),
+            options.mimeType = CoreMimetype.getMimeType(
+                CoreMimetype.getFileExtension(options.fileName),
             );
         }
 
@@ -401,7 +413,7 @@ export class CoreFileUploaderProvider {
         }
 
         if (filesObject.offline > 0) {
-            const offlineFiles = await CoreUtils.ignoreErrors(this.getStoredFiles(folderPath));
+            const offlineFiles = await CorePromiseUtils.ignoreErrors(this.getStoredFiles(folderPath));
 
             if (offlineFiles) {
                 files = files.concat(offlineFiles);
@@ -426,16 +438,16 @@ export class CoreFileUploaderProvider {
         if (mimetypes) {
             // Verify that the mimetype of the file is supported.
             if (mimetype) {
-                extension = CoreMimetypeUtils.getExtension(mimetype);
+                extension = CoreMimetype.getExtension(mimetype);
 
                 if (mimetypes.indexOf(mimetype) == -1) {
                     // Get the "main" mimetype of the extension.
                     // It's possible that the list of accepted mimetypes only includes the "main" mimetypes.
-                    mimetype = CoreMimetypeUtils.getMimeType(extension);
+                    mimetype = CoreMimetype.getMimeType(extension);
                 }
             } else if (path) {
-                extension = CoreMimetypeUtils.getFileExtension(path);
-                mimetype = CoreMimetypeUtils.getMimeType(extension);
+                extension = CoreMimetype.getFileExtension(path);
+                mimetype = CoreMimetype.getMimeType(extension);
             } else {
                 throw new CoreError('No mimetype or path supplied.');
             }
@@ -476,16 +488,16 @@ export class CoreFileUploaderProvider {
             if (filetype.indexOf('/') != -1) {
                 // It's a mimetype.
                 typesInfo.push({
-                    name: CoreMimetypeUtils.getMimetypeDescription(filetype),
-                    extlist: CoreMimetypeUtils.getExtensions(filetype).map(this.addDot).join(' '),
+                    name: CoreMimetype.getMimetypeDescription(filetype),
+                    extlist: CoreMimetype.getExtensions(filetype).map(this.addDot).join(' '),
                 });
 
                 mimetypes[filetype] = true;
             } else if (filetype.indexOf('.') === 0) {
                 // It's an extension.
-                const mimetype = CoreMimetypeUtils.getMimeType(filetype);
+                const mimetype = CoreMimetype.getMimeType(filetype);
                 typesInfo.push({
-                    name: mimetype && CoreMimetypeUtils.getMimetypeDescription(mimetype),
+                    name: mimetype && CoreMimetype.getMimetypeDescription(mimetype),
                     extlist: filetype,
                 });
 
@@ -494,12 +506,12 @@ export class CoreFileUploaderProvider {
                 }
             } else {
                 // It's a group.
-                const groupExtensions = CoreMimetypeUtils.getGroupMimeInfo(filetype, 'extensions');
-                const groupMimetypes = CoreMimetypeUtils.getGroupMimeInfo(filetype, 'mimetypes');
+                const groupExtensions = CoreMimetype.getGroupMimeInfo(filetype, 'extensions');
+                const groupMimetypes = CoreMimetype.getGroupMimeInfo(filetype, 'mimetypes');
 
                 if (groupExtensions && groupExtensions.length > 0) {
                     typesInfo.push({
-                        name: CoreMimetypeUtils.getTranslatedGroupName(filetype),
+                        name: CoreMimetype.getTranslatedGroupName(filetype),
                         extlist: groupExtensions.map(this.addDot).join(' '),
                     });
 
@@ -512,9 +524,9 @@ export class CoreFileUploaderProvider {
                     // Treat them as extensions.
                     filetype = this.addDot(filetype);
 
-                    const mimetype = CoreMimetypeUtils.getMimeType(filetype);
+                    const mimetype = CoreMimetype.getMimeType(filetype);
                     typesInfo.push({
-                        name: mimetype && CoreMimetypeUtils.getMimetypeDescription(mimetype),
+                        name: mimetype && CoreMimetype.getMimetypeDescription(mimetype),
                         extlist: filetype,
                     });
 
@@ -556,7 +568,7 @@ export class CoreFileUploaderProvider {
         await CoreFile.removeUnusedFiles(folderPath, files);
 
         await Promise.all(files.map(async (file) => {
-            if (!CoreUtils.isFileEntry(file)) {
+            if (!CoreFileUtils.isFileEntry(file)) {
                 // It's an online file, add it to the result and ignore it.
                 result.online.push({
                     filename: file.filename,
@@ -628,10 +640,10 @@ export class CoreFileUploaderProvider {
         }
 
         // Index the online files by name.
-        const usedNames: {[name: string]: CoreFileEntry} = {};
+        const usedNames: { [name: string]: CoreFileEntry } = {};
         const filesToUpload: FileEntry[] = [];
         files.forEach((file) => {
-            if (CoreUtils.isFileEntry(file)) {
+            if (CoreFileUtils.isFileEntry(file)) {
                 filesToUpload.push(<FileEntry> file);
             } else {
                 // It's an online file.
@@ -639,7 +651,8 @@ export class CoreFileUploaderProvider {
             }
         });
 
-        await Promise.all(filesToUpload.map(async (file) => {
+        // Upload files 1 by 1 to avoid race conditions in the server.
+        for (const file of filesToUpload) {
             // Make sure the file name is unique in the area.
             const name = CoreFile.calculateUniqueName(usedNames, file.name);
             usedNames[name] = file;
@@ -649,7 +662,7 @@ export class CoreFileUploaderProvider {
             const options = this.getFileUploadOptions(filePath, name, undefined, false, 'draft', itemId);
 
             await this.uploadFile(filePath, options, undefined, siteId);
-        }));
+        }
     }
 
     /**
@@ -677,9 +690,9 @@ export class CoreFileUploaderProvider {
         let fileName = '';
         let fileEntry: FileEntry | undefined;
 
-        const isOnline = !CoreUtils.isFileEntry(file);
+        const isOnline = !CoreFileUtils.isFileEntry(file);
 
-        if (CoreUtils.isFileEntry(file)) {
+        if (CoreFileUtils.isFileEntry(file)) {
             // Local file, we already have the file entry.
             fileName = file.name;
             fileEntry = file;
@@ -703,8 +716,8 @@ export class CoreFileUploaderProvider {
         }
 
         // Now upload the file.
-        const extension = CoreMimetypeUtils.getFileExtension(fileName);
-        const mimetype = extension ? CoreMimetypeUtils.getMimeType(extension) : undefined;
+        const extension = CoreMimetype.getFileExtension(fileName);
+        const mimetype = extension ? CoreMimetype.getMimeType(extension) : undefined;
         const filePath = CoreFile.getFileEntryURL(fileEntry);
         const options = this.getFileUploadOptions(filePath, fileName, mimetype, isOnline, 'draft', itemId);
 
@@ -742,14 +755,11 @@ export class CoreFileUploaderProvider {
         // Upload only the first file first to get a draft id.
         const itemId = await this.uploadOrReuploadFile(files[0], 0, component, componentId, siteId);
 
-        const promises: Promise<number>[] = [];
-
+        // Upload files 1 by 1 to avoid race conditions in the server.
         for (let i = 1; i < files.length; i++) {
             const file = files[i];
-            promises.push(this.uploadOrReuploadFile(file, itemId, component, componentId, siteId));
+            await this.uploadOrReuploadFile(file, itemId, component, componentId, siteId);
         }
-
-        await Promise.all(promises);
 
         return itemId;
     }

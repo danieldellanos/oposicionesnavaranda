@@ -92,7 +92,7 @@ export class FileTransferMock {
             this.errorCallback = errorCallback;
 
             if (basicAuthHeader) {
-                source = source.replace(this.getUrlCredentials(source) + '@', '');
+                source = source.replace(`${this.getUrlCredentials(source)}@`, '');
 
                 options = options || {};
                 options.headers = options.headers || {};
@@ -163,8 +163,8 @@ export class FileTransferMock {
      * @param urlString The URL to get the credentials from.
      * @returns The header with the credentials, null if no credentials.
      */
-    protected getBasicAuthHeader(urlString: string): {name: string; value: string} | null {
-        let header: {name: string; value: string} | null = null;
+    protected getBasicAuthHeader(urlString: string): { name: string; value: string } | null {
+        let header: { name: string; value: string } | null = null;
 
         // MS Windows doesn't support credentials in http uris so we detect them by regexp and strip off from result url.
         if (window.btoa) {
@@ -172,7 +172,7 @@ export class FileTransferMock {
             if (credentials) {
                 header = {
                     name: 'Authorization',
-                    value: 'Basic ' + window.btoa(credentials),
+                    value: `Basic ${window.btoa(credentials)}`,
                 };
             }
         }
@@ -258,7 +258,7 @@ export class FileTransferMock {
             let httpMethod: string | undefined;
 
             if (basicAuthHeader) {
-                url = url.replace(this.getUrlCredentials(url) + '@', '');
+                url = url.replace(`${this.getUrlCredentials(url)}@`, '');
 
                 options = options || {};
                 options.headers = options.headers || {};

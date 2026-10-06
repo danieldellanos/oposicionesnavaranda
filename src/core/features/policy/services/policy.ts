@@ -15,13 +15,14 @@
 import { Injectable } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
 import { CoreWSError } from '@classes/errors/wserror';
-import { CoreLoginHelper } from '@features/login/services/login-helper';
+import { CoreLoginSignUp } from '@features/login/services/signup';
 import { CoreNavigator } from '@services/navigator';
 import { CoreSites, CoreSitesCommonWSOptions } from '@services/sites';
 import { CoreWSExternalWarning } from '@services/ws';
 import { makeSingleton } from '@singletons';
 import { POLICY_PAGE_NAME, SITE_POLICY_PAGE_NAME } from '../constants';
-import { CoreSite } from '@classes/sites/site';
+import { CoreCacheUpdateFrequency } from '@/core/constants';
+import { CoreTextFormat } from '@static/text';
 
 /**
  * Service that provides some common features regarding policies.
@@ -75,9 +76,9 @@ export class CorePolicyService {
         try {
             // Try to get the latest config, maybe the site policy was just added or has changed.
             sitePolicy = await site.getConfig('sitepolicy', true);
-        } catch (error) {
+        } catch {
             // Cannot get config, try to get the site policy using signup settings.
-            const settings = await CoreLoginHelper.getEmailSignupSettings(site.getURL());
+            const settings = await CoreLoginSignUp.getEmailSignupSettings(site);
 
             sitePolicy = settings.sitepolicy;
         }
@@ -140,7 +141,7 @@ export class CorePolicyService {
         };
         const preSets = {
             cacheKey: this.getUserAcceptancesCacheKey(userId),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy),
         };
 
@@ -159,7 +160,7 @@ export class CorePolicyService {
      * @returns Cache key.
      */
     protected getUserAcceptancesCacheKey(userId: number): string {
-        return CorePolicyService.ROOT_CACHE_KEY + 'userAcceptances:' + userId;
+        return `${CorePolicyService.ROOT_CACHE_KEY}userAcceptances:${userId}`;
     }
 
     /**
@@ -188,9 +189,11 @@ export class CorePolicyService {
      * Invalidate acceptances WS call.
      *
      * @param options Options.
+     * @param options.userId User ID. If not defined, the site's user.
+     * @param options.siteId Site ID. If not defined, current site.
      * @returns Promise resolved when data is invalidated.
      */
-    async invalidateAcceptances(options: {userId?: number; siteId?: string} = {}): Promise<void> {
+    async invalidateAcceptances(options: { userId?: number; siteId?: string } = {}): Promise<void> {
         const site = await CoreSites.getSite(options.siteId);
 
         await site.invalidateWsCacheForKey(this.getUserAcceptancesCacheKey(options.userId || site.getUserId()));
@@ -280,9 +283,9 @@ export type CorePolicySitePolicy = {
     status: number; // The policy status. 0: draft, 1: active, 2: archived.
     name: string; // The policy name.
     summary?: string; // The policy summary.
-    summaryformat: number; // Summary format (1 = HTML, 0 = MOODLE, 2 = PLAIN, or 4 = MARKDOWN).
+    summaryformat: CoreTextFormat; // Summary format (1 = HTML, 0 = MOODLE, 2 = PLAIN, or 4 = MARKDOWN).
     content?: string; // The policy content.
-    contentformat: number; // Content format (1 = HTML, 0 = MOODLE, 2 = PLAIN, or 4 = MARKDOWN).
+    contentformat: CoreTextFormat; // Content format (1 = HTML, 0 = MOODLE, 2 = PLAIN, or 4 = MARKDOWN).
     acceptance?: CorePolicySitePolicyAcceptance; // Acceptance status for the given user.
     canaccept: boolean; // Whether the policy can be accepted.
     candecline: boolean; // Whether the policy can be declined.

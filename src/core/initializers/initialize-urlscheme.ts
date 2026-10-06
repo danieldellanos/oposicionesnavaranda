@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CorePlatform } from '@services/platform';
 import { CoreCustomURLSchemes } from '@services/urlschemes';
 import { NgZone } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
+import { CoreUrl } from '@static/url';
 
 /**
  * Asynchronous function to handle custom URLs when the app is launched.
@@ -42,8 +44,21 @@ export default async function(): Promise<void> {
 
             CoreEvents.trigger(CoreEvents.APP_LAUNCHED_URL, { url });
             CoreCustomURLSchemes.handleCustomURL(url).catch((error) => {
-                CoreCustomURLSchemes.treatHandleCustomURLError(error);
+                CoreCustomURLSchemes.treatHandleCustomURLError(error, url, 'handleOpenURL');
             });
         });
     };
+
+    // Allow launching the app with a deep link in web app.
+    const searchParams = new URLSearchParams(window.location.search);
+
+    await CorePlatform.ready();
+
+    if (!CorePlatform.isMobile()) {
+        const url = searchParams.get('webAppDeepLink');
+        if (url) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (<any> window).handleOpenURL(CoreUrl.decodeURIComponent(url));
+        }
+    }
 }

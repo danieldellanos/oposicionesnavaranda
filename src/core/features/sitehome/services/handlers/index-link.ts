@@ -20,9 +20,9 @@ import { CoreContentLinksAction } from '@features/contentlinks/services/contentl
 import { CoreSiteHome } from '../sitehome';
 import { makeSingleton } from '@singletons';
 import { CoreNavigator } from '@services/navigator';
-import { CoreSiteHomeHomeHandlerService } from './sitehome-home';
-import { CoreMainMenuHomeHandlerService } from '@features/mainmenu/services/handlers/mainmenu';
 import { Params } from '@angular/router';
+import { CORE_SITEHOME_MENU_FEATURE_NAME, CORE_SITEHOME_PAGE_NAME } from '@features/sitehome/constants';
+import { MAIN_MENU_HOME_PAGE_NAME } from '@features/mainmenu/constants';
 
 /**
  * Handler to treat links to site home index.
@@ -31,7 +31,7 @@ import { Params } from '@angular/router';
 export class CoreSiteHomeIndexLinkHandlerService extends CoreContentLinksHandlerBase {
 
     name = 'CoreSiteHomeIndexLinkHandler';
-    featureName = 'CoreMainMenuDelegate_CoreSiteHome';
+    featureName = CORE_SITEHOME_MENU_FEATURE_NAME;
     pattern = /(\/course\/view\.php.*([?&]id=\d+)|\/index\.php(\?redirect=0)?|\/?\?redirect=0)/;
 
     /**
@@ -48,7 +48,7 @@ export class CoreSiteHomeIndexLinkHandlerService extends CoreContentLinksHandler
         return [{
             action: async (siteId: string): Promise<void> => {
                 await CoreNavigator.navigateToSitePath(
-                    `/${CoreMainMenuHomeHandlerService.PAGE_NAME}/${CoreSiteHomeHomeHandlerService.PAGE_NAME}`,
+                    `/${MAIN_MENU_HOME_PAGE_NAME}/${CORE_SITEHOME_PAGE_NAME}`,
                     {
                         preferCurrentTab: false,
                         siteId,
@@ -70,14 +70,13 @@ export class CoreSiteHomeIndexLinkHandlerService extends CoreContentLinksHandler
         }
 
         const site = await CoreSites.getSite(siteId);
-        if (courseId != site.getSiteHomeId()) {
+        if (courseId !== site.getSiteHomeId()) {
             // The course is not site home.
             return false;
         }
 
-        return CoreSiteHome.isAvailable(siteId).then(() => true).catch(() => false);
+        return CoreSiteHome.isAvailable(siteId);
     }
 
 }
-
 export const CoreSiteHomeIndexLinkHandler = makeSingleton(CoreSiteHomeIndexLinkHandlerService);

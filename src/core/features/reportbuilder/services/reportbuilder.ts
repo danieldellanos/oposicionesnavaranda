@@ -19,12 +19,13 @@ import { CoreSites } from '@services/sites';
 import { CoreWSExternalWarning } from '@services/ws';
 import { makeSingleton } from '@singletons';
 
-const ROOT_CACHE_KEY = 'mmaReportBuilder:';
 export const REPORTS_LIST_LIMIT = 20;
 export const REPORT_ROWS_LIMIT = 20;
 
 @Injectable({ providedIn: 'root' })
 export class CoreReportBuilderService {
+
+    protected static readonly ROOT_CACHE_KEY = 'mmaReportBuilder:';
 
     /**
      * Obtain the reports list.
@@ -148,7 +149,7 @@ export class CoreReportBuilderService {
      * @returns Cache key.
      */
     protected getReportBuilderCacheKey(): string {
-        return ROOT_CACHE_KEY + 'list';
+        return `${CoreReportBuilderService.ROOT_CACHE_KEY}list`;
     }
 
     /**
@@ -157,7 +158,7 @@ export class CoreReportBuilderService {
      * @returns Cache key.
      */
     protected getReportBuilderReportCacheKey(): string {
-        return ROOT_CACHE_KEY + 'report';
+        return `${CoreReportBuilderService.ROOT_CACHE_KEY}report`;
     }
 
     isString(value: unknown): boolean {
@@ -227,9 +228,9 @@ export type CoreReportBuilderRetrieveReportWSResponse = {
     warnings?: CoreWSExternalWarning[];
 };
 
-export interface CoreReportBuilderRetrieveReportMapped extends Omit<CoreReportBuilderRetrieveReportWSResponse, 'details'> {
+export type CoreReportBuilderRetrieveReportMapped = Omit<CoreReportBuilderRetrieveReportWSResponse, 'details'> & {
     details: CoreReportBuilderReportDetail;
-}
+};
 
 export type CoreReportBuilderReportDataWSResponse = {
     headers: string[]; // Headers.
@@ -255,13 +256,13 @@ export type CoreReportBuilderViewReportWSResponse = {
     warnings?: CoreWSExternalWarning[];
 };
 
-export interface CoreReportBuilderReportDetail extends Omit<CoreReportBuilderReportWSResponse, 'settingsdata'> {
+export type CoreReportBuilderReportDetail = Omit<CoreReportBuilderReportWSResponse, 'settingsdata'> & {
     settingsdata: CoreReportBuilderReportDetailSettingsData;
-}
+};
 
 export type CoreReportBuilderReportDetailSettingsData = {
     cardviewShowFirstTitle: boolean;
     cardviewVisibleColumns: number;
 };
 
-export interface CoreReportBuilderReport extends CoreReportBuilderReportWSResponse {}
+export type CoreReportBuilderReport = CoreReportBuilderReportWSResponse;

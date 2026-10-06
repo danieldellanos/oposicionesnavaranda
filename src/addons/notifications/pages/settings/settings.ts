@@ -17,13 +17,12 @@ import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 import { CoreConfig } from '@services/config';
 import { CoreLocalNotifications } from '@services/local-notifications';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreUtils } from '@services/utils/utils';
-import { CoreUser } from '@features/user/services/user';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreUserPreferences } from '@features/user/services/user-preferences';
 import { AddonMessageOutputDelegate, AddonMessageOutputHandlerData } from '@addons/messageoutput/services/messageoutput-delegate';
-import { CoreConstants } from '@/core/constants';
+import { CoreConfigSettingKey } from '@/core/constants';
 import { CoreError } from '@classes/errors/error';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import {
     AddonNotifications,
     AddonNotificationsPreferencesNotificationProcessorState,
@@ -36,11 +35,13 @@ import {
     AddonNotificationsPreferencesProcessorFormatted,
 } from '@addons/notifications/services/notifications-helper';
 import { CoreNavigator } from '@services/navigator';
-import { CoreTime } from '@singletons/time';
+import { CoreTime } from '@static/time';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
 import { Translate } from '@singletons';
 import { CoreErrorHelper } from '@services/error-helper';
-import { CoreLoadings } from '@services/loadings';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Page that displays notifications settings.
@@ -48,9 +49,12 @@ import { CoreLoadings } from '@services/loadings';
 @Component({
     selector: 'page-addon-notifications-settings',
     templateUrl: 'settings.html',
-    styleUrls: ['settings.scss'],
+    styleUrl: 'settings.scss',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
+export default class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
 
     preferences?: AddonNotificationsPreferencesFormatted;
     components?: AddonNotificationsPreferencesComponentFormatted[];
@@ -60,7 +64,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
     canChangeSound: boolean;
     processorHandlers: AddonMessageOutputHandlerData[] = [];
     loggedInOffLegacyMode = false;
-    warningMessage = signal<string | undefined>(undefined);
+    readonly warningMessage = signal<string | undefined>(undefined);
 
     protected updateTimeout?: number;
     protected logView: () => void;
@@ -87,7 +91,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
      */
     async ngOnInit(): Promise<void> {
         if (this.canChangeSound) {
-            this.notificationSound = await CoreConfig.get<boolean>(CoreConstants.SETTINGS_NOTIFICATION_SOUND, true);
+            this.notificationSound = await CoreConfig.get<boolean>(CoreConfigSettingKey.NOTIFICATION_SOUND, true);
         }
 
         this.fetchPreferences();
@@ -127,7 +131,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
                 return;
             }
 
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
         } finally {
             this.preferencesLoaded = true;
         }
@@ -179,7 +183,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
      * @returns Promise resolved when done.
      */
     protected async updatePreferences(): Promise<void> {
-        await CoreUtils.ignoreErrors(AddonNotifications.invalidateNotificationPreferences());
+        await CorePromiseUtils.ignoreErrors(AddonNotifications.invalidateNotificationPreferences());
 
         await AddonNotifications.getNotificationPreferences();
     }
@@ -204,7 +208,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
      */
     async refreshPreferences(refresher?: HTMLIonRefresherElement): Promise<void> {
         try {
-            await CoreUtils.ignoreErrors(AddonNotifications.invalidateNotificationPreferences());
+            await CorePromiseUtils.ignoreErrors(AddonNotifications.invalidateNotificationPreferences());
 
             await this.fetchPreferences();
         } finally {
@@ -222,6 +226,13 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
     }
 
     /**
+     * Open reminders page.
+     */
+    openReminders(): void {
+        CoreNavigator.navigateToSitePath('reminders');
+    }
+
+    /**
      * Change the value of a certain preference.
      *
      * @param notification Notification object.
@@ -235,7 +246,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
         }
 
         const processorState: ProcessorStateFormatted = processor[state];
-        const preferenceName = notification.preferencekey + '_' + processorState.name;
+        const preferenceName = `${notification.preferencekey}_${processorState.name}`;
 
         let value = notification.processors
             .filter((processor) => processor[state].checked)
@@ -249,13 +260,13 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
         processorState.updating = true;
 
         try {
-            await CoreUser.updateUserPreference(preferenceName, value);
+            await CoreUserPreferences.setPreferenceOnline(preferenceName, value);
 
             // Update the preferences since they were modified.
             this.updatePreferencesAfterDelay();
         } catch (error) {
             // Show error and revert change.
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
             processor[state].checked = !processor[state].checked;
         } finally {
             processorState.updating = false;
@@ -274,7 +285,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
             return;
         }
 
-        const preferenceName = notification.preferencekey + '_enabled';
+        const preferenceName = `${notification.preferencekey}_enabled`;
 
         let value = notification.processors
             .filter((processor) => processor.enabled)
@@ -288,13 +299,13 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
         processor.updating = true;
 
         try {
-            await CoreUser.updateUserPreference(preferenceName, value);
+            await CoreUserPreferences.setPreferenceOnline(preferenceName, value);
 
             // Update the preferences since they were modified.
             this.updatePreferencesAfterDelay();
         } catch (error) {
             // Show error and revert change.
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
             processor.enabled = !processor.enabled;
         } finally {
             processor.updating = false;
@@ -315,13 +326,13 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
         const modal = await CoreLoadings.show('core.sending', true);
 
         try {
-            CoreUser.updateUserPreferences([], !enable);
+            CoreUserPreferences.setPreferencesOnline([], !enable);
 
             // Update the preferences since they were modified.
             this.updatePreferencesAfterDelay();
         } catch (error) {
             // Show error and revert change.
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
             this.preferences.enableall = !this.preferences.enableall;
         } finally {
             modal.dismiss();
@@ -334,7 +345,7 @@ export class AddonNotificationsSettingsPage implements OnInit, OnDestroy {
      * @param enabled True to enable the notification sound, false to disable it.
      */
     async changeNotificationSound(enabled: boolean): Promise<void> {
-        await CoreUtils.ignoreErrors(CoreConfig.set(CoreConstants.SETTINGS_NOTIFICATION_SOUND, enabled ? 1 : 0));
+        await CorePromiseUtils.ignoreErrors(CoreConfig.set(CoreConfigSettingKey.NOTIFICATION_SOUND, enabled ? 1 : 0));
 
         const siteId = CoreSites.getCurrentSiteId();
         CoreEvents.trigger(CoreEvents.NOTIFICATION_SOUND_CHANGED, { enabled }, siteId);

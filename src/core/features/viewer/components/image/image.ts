@@ -14,10 +14,10 @@
 
 import { Component, ElementRef, Input, OnInit, ViewChild, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
 import { DomSanitizer, ModalController, Translate } from '@singletons';
-import { CoreMath } from '@singletons/math';
+import { CoreMath } from '@static/math';
 import { Swiper } from 'swiper';
 import { SwiperOptions } from 'swiper/types';
-import { CoreSwiper } from '@singletons/swiper';
+import { CoreSwiper } from '@static/swiper';
 import { SafeResourceUrl } from '@angular/platform-browser';
 import { CoreSharedModule } from '@/core/shared.module';
 
@@ -28,7 +28,6 @@ import { CoreSharedModule } from '@/core/shared.module';
     selector: 'core-viewer-image',
     templateUrl: 'image.html',
     styleUrl: 'image.scss',
-    standalone: true,
     imports: [
         CoreSharedModule,
     ],
@@ -107,9 +106,11 @@ export class CoreViewerImageComponent implements OnInit {
         }
 
         let zoomRatio = this.swiper.zoom.scale;
-        zoomIn
-            ? zoomRatio *= 2
-            : zoomRatio /= 2;
+        if (zoomIn) {
+            zoomRatio *= 2;
+        } else {
+            zoomRatio /= 2;
+        }
 
         zoomRatio = CoreMath.clamp(zoomRatio, CoreViewerImageComponent.MIN_RATIO, CoreViewerImageComponent.MAX_RATIO);
 

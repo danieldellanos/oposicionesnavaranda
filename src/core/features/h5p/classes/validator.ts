@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreError } from '@classes/errors/error';
+import { CoreH5PMissingDependenciesError } from './errors/missing-dependencies-error';
 import { FileEntry, DirectoryEntry } from '@awesome-cordova-plugins/file/ngx';
 import { CoreFile, CoreFileFormat } from '@services/file';
 import { Translate } from '@singletons';
-import { CorePath } from '@singletons/path';
+import { CorePath } from '@static/path';
 import { CoreH5PSemantics } from './content-validator';
 import { CoreH5PCore, CoreH5PLibraryBasicData, CoreH5PMissingLibrary } from './core';
 import { CoreH5PFramework } from './framework';
@@ -216,7 +216,7 @@ export class CoreH5PValidator {
             await CoreFile.getFile(path);
 
             return true;
-        } catch (error) {
+        } catch {
             return false;
         }
     }
@@ -269,10 +269,10 @@ export class CoreH5PValidator {
             const libString = Object.keys(missingLibraries)[0];
             const missingLibrary = missingLibraries[libString];
 
-            throw new CoreError(Translate.instant('core.h5p.missingdependency', { $a: {
+            throw new CoreH5PMissingDependenciesError(Translate.instant('core.h5p.missingdependency', { $a: {
                 lib: missingLibrary.libString,
                 dep: libString,
-            } }));
+            } }), Object.values(missingLibraries));
         }
 
         return { librariesJsonData, mainJsonData, contentJsonData };
@@ -347,7 +347,7 @@ export class CoreH5PValidator {
 
             return langIndex;
 
-        } catch (error) {
+        } catch {
             // Probably doesn't exist, ignore.
         }
     }
@@ -363,7 +363,7 @@ export class CoreH5PValidator {
             const path = CorePath.concatenatePaths(libPath, 'semantics.json');
 
             return await CoreFile.readFile<CoreH5PSemantics[]>(path, CoreFileFormat.FORMATJSON);
-        } catch (error) {
+        } catch {
             // Probably doesn't exist, ignore.
         }
     }
@@ -409,7 +409,7 @@ export type CoreH5PMainJSONData = {
 /**
  * All JSON data for libraries of a package.
  */
-export type CoreH5PLibrariesJsonData = {[libString: string]: CoreH5PLibraryJsonData};
+export type CoreH5PLibrariesJsonData = { [libString: string]: CoreH5PLibraryJsonData };
 
 /**
  * All JSON data for a library, including semantics and language.
@@ -473,7 +473,7 @@ export type CoreH5PLibraryAddTo = {
 /**
  * Data stored in all languages JSON file of a library.
  */
-export type CoreH5PLibraryLangsJsonData = {[code: string]: CoreH5PLibraryLangJsonData};
+export type CoreH5PLibraryLangsJsonData = { [code: string]: CoreH5PLibraryLangJsonData };
 
 /**
  * Data stored in each language JSON file of a library.

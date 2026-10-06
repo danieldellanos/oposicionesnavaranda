@@ -27,21 +27,20 @@ import { CoreCourseOptionsDelegate } from '@features/course/services/course-opti
 import { CoreCourseFormatDelegate } from '@features/course/services/format-delegate';
 import { CoreCourseModuleDelegate } from '@features/course/services/module-delegate';
 import { CoreCourseModulePrefetchDelegate } from '@features/course/services/module-prefetch-delegate';
-import { CoreCoursesProvider } from '@features/courses/services/courses';
 import { CoreMainMenuDelegate } from '@features/mainmenu/services/mainmenu-delegate';
 import { CoreQuestionBehaviourDelegate } from '@features/question/services/behaviour-delegate';
 import { CoreQuestionDelegate } from '@features/question/services/question-delegate';
 import { CoreSettingsDelegate } from '@features/settings/services/settings-delegate';
-import { CoreUserDelegate } from '@features/user/services/user-delegate';
+import { CoreUserDelegate, CoreUserProfileHandlerType } from '@features/user/services/user-delegate';
 import { CoreUserProfileFieldDelegate } from '@features/user/services/user-profile-field-delegate';
 import { CoreFilepool } from '@services/filepool';
 import { CoreLang } from '@services/lang';
 import { CoreSites } from '@services/sites';
-import { CoreText } from '@singletons/text';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreText } from '@static/text';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { CoreWS } from '@services/ws';
-import { CoreEvents } from '@singletons/events';
-import { CoreLogger } from '@singletons/logger';
+import { CoreEvents } from '@static/events';
+import { CoreLogger } from '@static/logger';
 import { CoreSitePluginsAssignFeedbackHandler } from '../classes/handlers/assign-feedback-handler';
 import { CoreSitePluginsAssignSubmissionHandler } from '../classes/handlers/assign-submission-handler';
 import { CoreSitePluginsBlockHandler } from '../classes/handlers/block-handler';
@@ -55,7 +54,8 @@ import { CoreSitePluginsQuestionBehaviourHandler } from '../classes/handlers/que
 import { CoreSitePluginsQuestionHandler } from '../classes/handlers/question-handler';
 import { CoreSitePluginsQuizAccessRuleHandler } from '../classes/handlers/quiz-access-rule-handler';
 import { CoreSitePluginsSettingsHandler } from '../classes/handlers/settings-handler';
-import { CoreSitePluginsUserProfileHandler } from '../classes/handlers/user-handler';
+import { CoreSitePluginsUserProfileButtonHandler } from '../classes/handlers/user/button-user-handler';
+import { CoreSitePluginsUserProfileListHandler } from '../classes/handlers/user/list-user-handler';
 import { CoreSitePluginsUserProfileFieldHandler } from '../classes/handlers/user-profile-field-handler';
 import {
     CoreSitePlugins,
@@ -83,12 +83,14 @@ import { CoreSitePluginsWorkshopAssessmentStrategyHandler } from '../classes/han
 import { CoreContentLinksModuleIndexHandler } from '@features/contentlinks/classes/module-index-handler';
 import { CoreContentLinksDelegate } from '@features/contentlinks/services/contentlinks-delegate';
 import { CoreContentLinksModuleListHandler } from '@features/contentlinks/classes/module-list-handler';
-import { CoreObject } from '@singletons/object';
-import { CoreUrl } from '@singletons/url';
-import { CorePath } from '@singletons/path';
+import { CoreObject } from '@static/object';
+import { CoreUrl } from '@static/url';
+import { CorePath } from '@static/path';
 import { CoreEnrolAction, CoreEnrolDelegate } from '@features/enrol/services/enrol-delegate';
 import { CoreSitePluginsEnrolHandler } from '../classes/handlers/enrol-handler';
 import { CORE_SITE_PLUGINS_COMPONENT } from '../constants';
+import { CORE_COURSES_MY_COURSES_CHANGED_EVENT } from '@features/courses/constants';
+import { CoreSitePluginsBaseHandler } from '../classes/handlers/base-handler';
 
 /**
  * Helper service to provide functionalities regarding site plugins. It basically has the features to load and register site
@@ -102,19 +104,16 @@ import { CORE_SITE_PLUGINS_COMPONENT } from '../constants';
 @Injectable({ providedIn: 'root' })
 export class CoreSitePluginsInitService {
 
-    protected logger: CoreLogger;
+    protected logger = CoreLogger.getInstance('CoreSitePluginsInit');
     protected courseRestrictHandlers: Record<string, {
         plugin: CoreSitePluginsPlugin;
         handlerName: string;
         handlerSchema: CoreSitePluginsCourseOptionHandlerData | CoreSitePluginsUserHandlerData;
-        handler: CoreSitePluginsCourseOptionHandler | CoreSitePluginsUserProfileHandler;
+        handler: CoreSitePluginsCourseOptionHandler | CoreSitePluginsUserProfileButtonHandler |
+            CoreSitePluginsUserProfileListHandler;
     }> = {};
 
     protected static readonly HANDLER_DISABLED = 'core_site_plugins_helper_handler_disabled';
-
-    constructor() {
-        this.logger = CoreLogger.getInstance('CoreSitePluginsInit');
-    }
 
     /**
      * Initialize.
@@ -123,7 +122,7 @@ export class CoreSitePluginsInitService {
         // Fetch the plugins on login.
         CoreEvents.on(CoreEvents.LOGIN, async (data) => {
             try {
-                const plugins = await CoreUtils.ignoreErrors(CoreSitePlugins.getPlugins(data.siteId));
+                const plugins = await CorePromiseUtils.ignoreErrors(CoreSitePlugins.getPlugins(data.siteId));
 
                 // Plugins fetched, check that site hasn't changed.
                 if (data.siteId !== CoreSites.getCurrentSiteId() || !plugins?.length) {
@@ -144,7 +143,7 @@ export class CoreSitePluginsInitService {
         });
 
         // Re-load plugins restricted for courses when the list of user courses changes.
-        CoreEvents.on(CoreCoursesProvider.EVENT_MY_COURSES_CHANGED, (data) => {
+        CoreEvents.on(CORE_COURSES_MY_COURSES_CHANGED_EVENT, (data) => {
             if (data.siteId && data.siteId === CoreSites.getCurrentSiteId() && data.added.length) {
                 this.reloadCourseRestrictHandlers();
             }
@@ -176,21 +175,21 @@ export class CoreSitePluginsInitService {
 
         if (url && handlerSchema.styles?.version) {
             // Add the version to the URL to prevent getting a cached file.
-            url += (url.indexOf('?') != -1 ? '&' : '?') + 'version=' + handlerSchema.styles.version;
+            url += `${url.includes('?') ? '&' : '?'}version=${handlerSchema.styles.version}`;
         }
 
         const uniqueName = CoreSitePlugins.getHandlerUniqueName(plugin, handlerName);
-        const componentId = uniqueName + '#main';
+        const componentId = `${uniqueName}#main`;
 
         // Remove the CSS files for this handler that aren't used anymore. Don't block the call for this.
-        const files = await CoreUtils.ignoreErrors(
+        const files = await CorePromiseUtils.ignoreErrors(
             CoreFilepool.getFilesByComponent(site.getId(), CORE_SITE_PLUGINS_COMPONENT, componentId),
         );
 
         files?.forEach((file) => {
             if (file.url !== url) {
                 // It's not the current file, delete it.
-                CoreUtils.ignoreErrors(CoreFilepool.removeFileByUrl(site.getId(), file.url));
+                CorePromiseUtils.ignoreErrors(CoreFilepool.removeFileByUrl(site.getId(), file.url));
             }
         });
 
@@ -262,7 +261,7 @@ export class CoreSitePluginsInitService {
 
         const result = <CoreSitePluginsContent> await CoreSitePlugins.getContent(plugin.component, method, {}, preSets);
 
-        if (!result.javascript || CoreSites.getCurrentSiteId() != siteId) {
+        if (!result.javascript || CoreSites.getCurrentSiteId() !== siteId) {
             // No javascript or site has changed, stop.
             return result;
         }
@@ -301,7 +300,7 @@ export class CoreSitePluginsInitService {
      */
     protected getPrefixForStrings(addon: string): string {
         if (addon) {
-            return 'plugin.' + addon + '.';
+            return `plugin.${addon}.`;
         }
 
         return '';
@@ -328,11 +327,8 @@ export class CoreSitePluginsInitService {
             return;
         }
 
-        for (const lang in plugin.parsedLang) {
-            const prefix = this.getPrefixForStrings(plugin.addon);
-
-            CoreLang.addSitePluginsStrings(lang, plugin.parsedLang[lang], prefix);
-        }
+        const prefix = this.getPrefixForStrings(plugin.addon);
+        CoreLang.addSitePluginsStrings(plugin.parsedLang, prefix);
     }
 
     /**
@@ -367,7 +363,7 @@ export class CoreSitePluginsInitService {
         if (plugin.parsedHandlers) {
             // Register all the handlers.
             const parsedHandlers = plugin.parsedHandlers;
-            await CoreUtils.allPromises(Object.keys(parsedHandlers).map(async (name) => {
+            await CorePromiseUtils.allPromises(Object.keys(parsedHandlers).map(async (name) => {
                 await this.registerHandler(plugin, name, parsedHandlers[name]);
             }));
         }
@@ -379,9 +375,11 @@ export class CoreSitePluginsInitService {
      * @param plugins The plugins to load.
      */
     protected async loadSitePlugins(plugins: CoreSitePluginsPlugin[]): Promise<void> {
+        await CoreSites.deleteTokensFromOtherSites();
+
         this.courseRestrictHandlers = {};
 
-        await CoreUtils.allPromises(plugins.map(async (plugin) => {
+        await CorePromiseUtils.allPromises(plugins.map(async (plugin) => {
             const pluginPromise = this.loadSitePlugin(plugin);
             CoreSitePlugins.registerSitePluginPromise(plugin.component, pluginPromise);
 
@@ -413,7 +411,7 @@ export class CoreSitePluginsInitService {
         const styleEl = document.createElement('style');
         const uniqueName = CoreSitePlugins.getHandlerUniqueName(plugin, handlerName);
 
-        styleEl.setAttribute('id', 'siteplugin-' + uniqueName);
+        styleEl.setAttribute('id', `siteplugin-${uniqueName}`);
         styleEl.innerHTML = cssCode;
 
         // To ensure consistency, insert in alphabetical order among other site plugin styles.
@@ -433,7 +431,7 @@ export class CoreSitePluginsInitService {
         }
 
         // Styles have been loaded, now treat the CSS.
-        CoreUtils.ignoreErrors(
+        CorePromiseUtils.ignoreErrors(
             CoreFilepool.treatCSSCode(siteId, fileUrl, cssCode, CORE_SITE_PLUGINS_COMPONENT, uniqueName, version),
         );
     }
@@ -558,7 +556,7 @@ export class CoreSitePluginsInitService {
                 });
             }
         } catch (error) {
-            throw new CoreError('Error executing init method ' + handlerSchema.init + ': ' + error.message);
+            throw new CoreError(`Error executing init method ${handlerSchema.init}: ${error.message}`);
         }
     }
 
@@ -570,6 +568,8 @@ export class CoreSitePluginsInitService {
      * @param plugin Data of the plugin.
      * @param handlerName Name of the handler in the plugin.
      * @param handlerSchema Data about the handler.
+     * @param delegate Delegate where the handler should be registered.
+     * @param createHandlerFn Function to create the handler instance.
      * @returns A promise resolved with a string to identify the handler.
      */
     protected async registerComponentInitHandler<T extends CoreDelegateHandler>(
@@ -602,18 +602,7 @@ export class CoreSitePluginsInitService {
             handlerSchema.methodJSResult = result.jsResult;
             handlerSchema.methodOtherdata = result.otherdata;
 
-            if (result.jsResult) {
-                // Override default handler functions with the result of the method JS.
-                const jsResult = <Record<string, unknown>> result.jsResult;
-                const handlerProperties = CoreObject.getAllPropertyNames(handler);
-
-                for (const property of handlerProperties) {
-                    if (property !== 'constructor' && typeof handler[property] === 'function' &&
-                            typeof jsResult[property] === 'function') {
-                        handler[property] = (<Function> jsResult[property]).bind(handler);
-                    }
-                }
-            }
+            this.overrideHandlerFunctions(handler, result);
 
             delegate.registerHandler(handler);
 
@@ -825,18 +814,7 @@ export class CoreSitePluginsInitService {
                 return;
             }
 
-            if (result.jsResult) {
-                // Override default handler functions with the result of the method JS.
-                const jsResult = <Record<string, unknown>> result.jsResult;
-                const handlerProperties = CoreObject.getAllPropertyNames(handler);
-
-                for (const property of handlerProperties) {
-                    if (property !== 'constructor' && typeof handler[property] === 'function' &&
-                            typeof jsResult[property] === 'function') {
-                        handler[property] = (<Function> jsResult[property]).bind(handler);
-                    }
-                }
-            }
+            this.overrideHandlerFunctions(handler, result);
         }
 
         CoreEnrolDelegate.registerHandler(handler);
@@ -859,7 +837,7 @@ export class CoreSitePluginsInitService {
         handlerSchema: CoreSitePluginsMainMenuHandlerData,
         initResult: CoreSitePluginsContent | null,
     ): string | undefined {
-        if (!handlerSchema.displaydata) {
+        if (!handlerSchema.displaydata && !handlerSchema.displayinline) {
             // Required data not provided, stop.
             this.logger.warn('Ignore site plugin because it doesn\'t provide displaydata', plugin, handlerSchema);
 
@@ -870,7 +848,7 @@ export class CoreSitePluginsInitService {
 
         // Create and register the handler.
         const uniqueName = CoreSitePlugins.getHandlerUniqueName(plugin, handlerName);
-        const prefixedTitle = this.getPrefixedString(plugin.addon, handlerSchema.displaydata.title);
+        const prefixedTitle = this.getPrefixedString(plugin.addon, handlerSchema.displaydata?.title);
 
         CoreMainMenuDelegate.registerHandler(
             new CoreSitePluginsMainMenuHandler(uniqueName, prefixedTitle, plugin, handlerSchema, initResult),
@@ -957,12 +935,12 @@ export class CoreSitePluginsInitService {
         // Create default link handlers if needed.
         if (!moduleHandler.supportsNoViewLink() && handlerSchema.method && !handlerSchema.nolinkhandlers) {
             const indexLinkHandler = new CoreContentLinksModuleIndexHandler(uniqueName, modName);
-            indexLinkHandler.name = uniqueName + '_indexlink';
+            indexLinkHandler.name = `${uniqueName}_indexlink`;
             indexLinkHandler.priority = -1; // Use -1 to give more priority to the plugins link handlers if any.
             CoreContentLinksDelegate.registerHandler(indexLinkHandler);
 
             const listLinkHandler = new CoreContentLinksModuleListHandler(uniqueName, modName);
-            listLinkHandler.name = uniqueName + '_listlink';
+            listLinkHandler.name = `${uniqueName}_listlink`;
             listLinkHandler.priority = -1; // Use -1 to give more priority to the plugins link handlers if any.
             CoreContentLinksDelegate.registerHandler(listLinkHandler);
         }
@@ -1095,7 +1073,7 @@ export class CoreSitePluginsInitService {
         handlerSchema: CoreSitePluginsUserHandlerData,
         initResult: CoreSitePluginsContent | null,
     ): string | undefined {
-        if (!handlerSchema.displaydata) {
+        if (!handlerSchema.displaydata && !handlerSchema.displayinline) {
             // Required data not provided, stop.
             this.logger.warn('Ignore site plugin because it doesn\'t provide displaydata', plugin, handlerSchema);
 
@@ -1106,8 +1084,12 @@ export class CoreSitePluginsInitService {
 
         // Create and register the handler.
         const uniqueName = CoreSitePlugins.getHandlerUniqueName(plugin, handlerName);
-        const prefixedTitle = this.getPrefixedString(plugin.addon, handlerSchema.displaydata.title);
-        const handler = new CoreSitePluginsUserProfileHandler(uniqueName, prefixedTitle, plugin, handlerSchema, initResult);
+        const prefixedTitle = this.getPrefixedString(plugin.addon, handlerSchema.displaydata?.title);
+
+        // Only support LIST_ITEM and BUTTON.
+        const handler = handlerSchema.type === CoreUserProfileHandlerType.BUTTON ?
+            new CoreSitePluginsUserProfileButtonHandler(uniqueName, prefixedTitle, plugin, handlerSchema, initResult) :
+            new CoreSitePluginsUserProfileListHandler(uniqueName, prefixedTitle, plugin, handlerSchema, initResult);
 
         CoreUserDelegate.registerHandler(handler);
 
@@ -1242,6 +1224,34 @@ export class CoreSitePluginsInitService {
         );
 
         return uniqueName;
+    }
+
+    /**
+     * Override some functions in a handler with the result of the JS returned by a get_content call.
+     *
+     * @param handler Handler to override.
+     * @param result Result of the get_content call.
+     */
+    protected overrideHandlerFunctions(handler: CoreSitePluginsBaseHandler, result: CoreSitePluginsContent | null): void {
+        if (!result || !result.jsResult) {
+            // No JS result, nothing to do.
+            return;
+        }
+
+        // Override default handler functions with the result of the method JS.
+        const jsResult = <Record<string, unknown>> result.jsResult;
+        const handlerProperties = CoreObject.getAllPropertyNames(handler);
+
+        for (const property of handlerProperties) {
+            if (
+                property !== 'constructor' &&
+                typeof handler[property] === 'function' &&
+                typeof jsResult[property] === 'function'
+            ) {
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+                handler[property] = (<Function> jsResult[property]).bind(handler);
+            }
+        }
     }
 
 }

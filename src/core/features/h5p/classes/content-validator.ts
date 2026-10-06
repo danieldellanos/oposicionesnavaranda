@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreText } from '@singletons/text';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreText } from '@static/text';
+import { CoreUtils } from '@static/utils';
 import { CoreH5P } from '@features/h5p/services/h5p';
 import { Translate } from '@singletons';
 import { CoreH5PCore, CoreH5PLibraryData, CoreH5PLibraryAddonData, CoreH5PContentDepsTreeDependency } from './core';
-import { CoreArray } from '@singletons/array';
+import { CoreArray } from '@static/array';
+import { CoreObject } from '@static/object';
 
 const ALLOWED_STYLEABLE_TAGS = ['span', 'p', 'div', 'h1', 'h2', 'h3', 'table', 'col', 'figure', 'td', 'th', 'li'];
 
@@ -29,8 +30,8 @@ export class CoreH5PContentValidator {
 
     protected typeMap = {
         text: 'validateText',
-        number: 'validateNumber', // eslint-disable-line id-blacklist
-        boolean: 'validateBoolean', // eslint-disable-line id-blacklist
+        number: 'validateNumber', // eslint-disable-line id-denylist
+        boolean: 'validateBoolean', // eslint-disable-line id-denylist
         list: 'validateList',
         group: 'validateGroup',
         file: 'validateFile',
@@ -42,10 +43,10 @@ export class CoreH5PContentValidator {
     };
 
     protected nextWeight = 1;
-    protected libraries: {[libString: string]: CoreH5PLibraryData} = {};
-    protected dependencies: {[key: string]: CoreH5PContentDepsTreeDependency} = {};
+    protected libraries: { [libString: string]: CoreH5PLibraryData } = {};
+    protected dependencies: { [key: string]: CoreH5PContentDepsTreeDependency } = {};
     protected relativePathRegExp = /^((\.\.\/){1,2})(.*content\/)?(\d+|editor)\/(.+)$/;
-    protected allowedHtml: {[tag: string]: string} = {};
+    protected allowedHtml: { [tag: string]: string } = {};
     protected allowedStyles?: RegExp[];
     protected metadataSemantics?: CoreH5PSemantics[];
     protected copyrightSemantics?: CoreH5PSemantics;
@@ -59,7 +60,7 @@ export class CoreH5PContentValidator {
      * @returns Promise resolved when done.
      */
     async addon(library: CoreH5PLibraryAddonData): Promise<void> {
-        const depKey = 'preloaded-' + library.machineName;
+        const depKey = `preloaded-${library.machineName}`;
 
         this.dependencies[depKey] = {
             library: library,
@@ -76,7 +77,7 @@ export class CoreH5PContentValidator {
      *
      * @returns Dependencies.
      */
-    getDependencies(): {[key: string]: CoreH5PContentDepsTreeDependency} {
+    getDependencies(): { [key: string]: CoreH5PContentDepsTreeDependency } {
         return this.dependencies;
     }
 
@@ -107,7 +108,7 @@ export class CoreH5PContentValidator {
      * @returns Validated text.
      */
     validateText(text: string, semantics: CoreH5PSemantics): string {
-        if (typeof text != 'string') {
+        if (typeof text !== 'string') {
             text = '';
         }
 
@@ -163,7 +164,7 @@ export class CoreH5PContentValidator {
             // Allow styling of tables if they are allowed
             if (semantics.tags?.indexOf('table') != -1) {
                 // CKEditor outputs border as width style color
-                // eslint-disable-next-line max-len
+                // eslint-disable-next-line @stylistic/max-len
                 stylePatterns.push(/^border: *[0-9.]+(em|px|%|) *(none|solid|dotted|dashed|double|groove|ridge|inset|outset) *(#[a-f0-9]{3}[a-f0-9]{3}?|rgba?\([0-9, ]+\)|hsla?\([0-9,.% ]+\)) *;?$/i);
                 stylePatterns.push(/^border-style: *(none|solid|dotted|dashed|double|groove|ridge|inset|outset) *;?$/i);
                 stylePatterns.push(/^border-width: *[0-9.]+(em|px|%|) *;?$/i);
@@ -206,7 +207,7 @@ export class CoreH5PContentValidator {
      * @returns True if all files are valid.
      */
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    validateContentFiles(contentPath: string, isLibrary: boolean = false): boolean {
+    validateContentFiles(contentPath: string, isLibrary = false): boolean {
         // Nothing to do, already checked by Moodle.
         return true;
     }
@@ -354,7 +355,7 @@ export class CoreH5PContentValidator {
         }
 
         if (!isArray) {
-            list = CoreUtils.objectToArray(<Record<string, unknown>> list);
+            list = CoreObject.toArray(<Record<string, unknown>> list);
         }
 
         if (!list.length) {
@@ -397,13 +398,22 @@ export class CoreH5PContentValidator {
         }
         validKeys = CoreArray.unique(validKeys);
 
+        // Hack to sanitize quality name. Ideally we should not allow extraAttributes, or we must build
+        // functionality for generically sanitize it.
+        if (validKeys.includes('metadata') && file.metadata) {
+            const fileMetadata = file.metadata;
+            if (fileMetadata.qualityName) {
+                fileMetadata.qualityName = CoreText.escapeHTML(fileMetadata.qualityName, false);
+            }
+        }
+
         this.filterParams(file, validKeys);
 
-        if (typeof file.width == 'string') {
+        if (typeof file.width === 'string') {
             file.width = parseInt(file.width, 10);
         }
 
-        if (typeof file.height == 'string') {
+        if (typeof file.height === 'string') {
             file.height = parseInt(file.height, 10);
         }
 
@@ -411,7 +421,7 @@ export class CoreH5PContentValidator {
             file.codecs = CoreText.escapeHTML(file.codecs, false);
         }
 
-        if (typeof file.bitrate == 'string') {
+        if (typeof file.bitrate === 'string') {
             file.bitrate = parseInt(file.bitrate, 10);
         }
 
@@ -493,7 +503,7 @@ export class CoreH5PContentValidator {
      * @param flatten Whether to flatten.
      * @returns Promise resolved when done.
      */
-    async validateGroup(group: unknown, semantics: CoreH5PSemantics, flatten: boolean = true): Promise<unknown> {
+    async validateGroup(group: unknown, semantics: CoreH5PSemantics, flatten = true): Promise<unknown> {
         if (!semantics.fields) {
             return group;
         }
@@ -590,7 +600,7 @@ export class CoreH5PContentValidator {
         }
 
         // Find all dependencies for this library.
-        const depKey = 'preloaded-' + library.machineName;
+        const depKey = `preloaded-${library.machineName}`;
         if (!this.dependencies[depKey]) {
             this.dependencies[depKey] = {
                 library: library,
@@ -631,7 +641,7 @@ export class CoreH5PContentValidator {
      * @returns An XSS safe version of the string.
      */
     protected filterXss(text: string, allowedTags?: string[], allowedStyles?: RegExp[]): string {
-        if (!text || typeof text != 'string') {
+        if (!text || typeof text !== 'string') {
             return text;
         }
 
@@ -675,9 +685,9 @@ export class CoreH5PContentValidator {
      * @param store Whether to store m.
      * @returns string If the element isn't allowed, an empty string. Otherwise, the cleaned up version of the HTML element.
      */
-    protected filterXssSplit(tags: string[], store: boolean = false): string {
+    protected filterXssSplit(tags: string[], store = false): string {
         if (store) {
-            this.allowedHtml = CoreUtils.arrayToObject(tags);
+            this.allowedHtml = CoreArray.toObject(tags);
 
             return '';
         }
@@ -717,7 +727,7 @@ export class CoreH5PContentValidator {
         }
 
         if (slash != '') {
-            return '</' + elem + '>';
+            return `</${elem}>`;
         }
 
         // Is there a closing XHTML slash at the end of the attributes?
@@ -730,9 +740,9 @@ export class CoreH5PContentValidator {
             ALLOWED_STYLEABLE_TAGS.indexOf(elem) != -1 ? this.allowedStyles : undefined,
         ).join(' ');
         attr2 = attr2.replace(/[<>]/g, '');
-        attr2 = attr2.length ? ' ' + attr2 : '';
+        attr2 = attr2.length ? ` ${attr2}` : '';
 
-        return '<' + elem + attr2 + xhtmlSlash + '>';
+        return `<${elem}${attr2}${xhtmlSlash}>`;
     }
 
     /**
@@ -794,7 +804,7 @@ export class CoreH5PContentValidator {
                             // Allow certain styles.
 
                             // Prevent font family from getting split wrong because of the ; in &quot;
-                            if (matches[1].includes('font-family')) {
+                            if (matches[1].toLowerCase().includes('font-family')) {
                                 matches[1] = matches[1].replace(/&quot;/g, '\'');
                             }
 
@@ -811,14 +821,14 @@ export class CoreH5PContentValidator {
                                 }
                             }
 
-                            attrArray.push('style="' + validatedStyles.join(';') + ';"');
+                            attrArray.push(`style="${validatedStyles.join(';')};"`);
                             break;
                         }
 
                         thisVal = this.filterXssBadProtocol(matches[1]);
 
                         if (!skip) {
-                            attrArray.push(attrName + '="' + thisVal + '"');
+                            attrArray.push(`${attrName}="${thisVal}"`);
                         }
                         working = 1;
                         mode = 0;
@@ -831,7 +841,7 @@ export class CoreH5PContentValidator {
                         thisVal = this.filterXssBadProtocol(matches[1]);
 
                         if (!skip) {
-                            attrArray.push(attrName + '="' + thisVal + '"');
+                            attrArray.push(`${attrName}="${thisVal}"`);
                         }
                         working = 1;
                         mode = 0;
@@ -844,7 +854,7 @@ export class CoreH5PContentValidator {
                         thisVal = this.filterXssBadProtocol(matches[1]);
 
                         if (!skip) {
-                            attrArray.push(attrName + '="' + thisVal + '"');
+                            attrArray.push(`${attrName}="${thisVal}"`);
                         }
                         working = 1;
                         mode = 0;
@@ -877,7 +887,7 @@ export class CoreH5PContentValidator {
      * @param decode Whether to decode entities in the str.
      * @returns Cleaned up and HTML-escaped version of str.
      */
-    filterXssBadProtocol(str: string, decode: boolean = true): string {
+    filterXssBadProtocol(str: string, decode = true): string {
         // Get the plain text representation of the attribute value (i.e. its meaning).
         if (decode) {
             str = CoreText.decodeHTMLEntities(str);
@@ -1412,6 +1422,7 @@ type FileLike = {
         label?: string;
     };
     copyright?: unknown;
+    metadata?: Record<string, string | number | undefined | null>;
 };
 
 /**

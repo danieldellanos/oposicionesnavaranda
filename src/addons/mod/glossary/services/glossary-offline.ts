@@ -16,10 +16,10 @@ import { Injectable } from '@angular/core';
 import { CoreFileUploaderStoreFilesResult } from '@features/fileuploader/services/fileuploader';
 import { CoreFile } from '@services/file';
 import { CoreSites } from '@services/sites';
-import { CoreText } from '@singletons/text';
+import { CoreText } from '@static/text';
 import { makeSingleton } from '@singletons';
-import { CoreEvents } from '@singletons/events';
-import { CorePath } from '@singletons/path';
+import { CoreEvents } from '@static/events';
+import { CorePath } from '@static/path';
 import { AddonModGlossaryOfflineEntryDBRecord, OFFLINE_ENTRIES_TABLE_NAME } from './database/glossary';
 import { AddonModGlossaryEntryOption } from './glossary';
 import { ADDON_MOD_GLOSSARY_ENTRY_DELETED, ADDON_MOD_GLOSSARY_ENTRY_ADDED, ADDON_MOD_GLOSSARY_ENTRY_UPDATED } from '../constants';
@@ -241,7 +241,7 @@ export class AddonModGlossaryOfflineProvider {
         const site = await CoreSites.getSite(siteId);
 
         const siteFolderPath = CoreFile.getSiteFolder(site.getId());
-        const folderPath = 'offlineglossary/' + glossaryId;
+        const folderPath = `offlineglossary/${glossaryId}`;
 
         return CorePath.concatenatePaths(siteFolderPath, folderPath);
     }
@@ -258,7 +258,7 @@ export class AddonModGlossaryOfflineProvider {
     async getEntryFolder(glossaryId: number, concept: string, timeCreated: number, siteId?: string): Promise<string> {
         const folderPath = await this.getGlossaryFolder(glossaryId, siteId);
 
-        return CorePath.concatenatePaths(folderPath, 'newentry_' + concept + '_' + timeCreated);
+        return CorePath.concatenatePaths(folderPath, `newentry_${concept}_${timeCreated}`);
     }
 
     /**

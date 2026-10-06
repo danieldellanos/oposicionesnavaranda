@@ -18,7 +18,7 @@ import { CoreContentLinksAction } from '@features/contentlinks/services/contentl
 import { CoreNavigator } from '@services/navigator';
 import { makeSingleton } from '@singletons';
 import { AddonMessages } from '../messages';
-import { AddonMessagesMainMenuHandlerService } from './mainmenu';
+import { ADDON_MESSAGES_PAGE_NAME } from '@addons/messages/constants';
 
 /**
  * Content links handler for messaging index.
@@ -31,14 +31,12 @@ export class AddonMessagesIndexLinkHandlerService extends CoreContentLinksHandle
     pattern = /\/message\/index\.php((?![?&](id|user1|user2)=\d+).)*$/;
 
     /**
-     * Get the list of actions for a link (url).
-     *
-     * @returns List of (or promise resolved with list of) actions.
+     * @inheritdoc
      */
     getActions(): CoreContentLinksAction[] | Promise<CoreContentLinksAction[]> {
         return [{
             action: async (siteId): Promise<void> => {
-                await CoreNavigator.navigateToSitePath(AddonMessagesMainMenuHandlerService.PAGE_NAME, {
+                await CoreNavigator.navigateToSitePath(ADDON_MESSAGES_PAGE_NAME, {
                     siteId,
                     preferCurrentTab: false,
                 });
@@ -47,11 +45,7 @@ export class AddonMessagesIndexLinkHandlerService extends CoreContentLinksHandle
     }
 
     /**
-     * Check if the handler is enabled for a certain site (site + user) and a URL.
-     * If not defined, defaults to true.
-     *
-     * @param siteId The site ID.
-     * @returns Whether the handler is enabled for the URL and site.
+     * @inheritdoc
      */
     isEnabled(siteId: string): Promise<boolean> {
         return AddonMessages.isPluginEnabled(siteId);

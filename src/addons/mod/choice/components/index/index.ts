@@ -12,21 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, Optional, OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
 import { CoreCourseModuleMainActivityComponent } from '@features/course/classes/main-activity-component';
-import { CoreCourseContentsPage } from '@features/course/pages/contents/contents';
-import { IonContent } from '@ionic/angular';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreTimeUtils } from '@services/utils/time';
+import { CoreTime } from '@static/time';
 import { Translate } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import {
     AddonModChoice,
     AddonModChoiceChoice,
     AddonModChoiceOption,
     AddonModChoiceResult,
+    AddonModChoiceUserResponseOption,
 } from '../../services/choice';
 import { AddonModChoiceOffline } from '../../services/choice-offline';
 import {
@@ -34,14 +32,19 @@ import {
     AddonModChoiceSync,
     AddonModChoiceSyncResult,
 } from '../../services/choice-sync';
-import { AddonModChoicePrefetchHandler } from '../../services/handlers/prefetch';
 import {
     ADDON_MOD_CHOICE_AUTO_SYNCED,
-    ADDON_MOD_CHOICE_COMPONENT,
+    ADDON_MOD_CHOICE_COMPONENT_LEGACY,
+    ADDON_MOD_CHOICE_MODNAME,
     ADDON_MOD_CHOICE_PUBLISH_ANONYMOUS,
     AddonModChoiceShowResults,
 } from '../../constants';
-import { CoreLoadings } from '@services/loadings';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreCourseModuleNavigationComponent } from '@features/course/components/module-navigation/module-navigation';
+import { CoreCourseModuleInfoComponent } from '@features/course/components/module-info/module-info';
+import { CoreGroupInfo, CoreGroups } from '@services/groups';
 
 /**
  * Component that displays a choice.
@@ -49,36 +52,41 @@ import { CoreLoadings } from '@services/loadings';
 @Component({
     selector: 'addon-mod-choice-index',
     templateUrl: 'addon-mod-choice-index.html',
+    styleUrl: 'index.scss',
+    imports: [
+        CoreSharedModule,
+        CoreCourseModuleInfoComponent,
+        CoreCourseModuleNavigationComponent,
+    ],
 })
 export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityComponent implements OnInit {
 
-    component = ADDON_MOD_CHOICE_COMPONENT;
-    pluginName = 'choice';
+    component = ADDON_MOD_CHOICE_COMPONENT_LEGACY;
+    pluginName = ADDON_MOD_CHOICE_MODNAME;
 
     choice?: AddonModChoiceChoice;
     options: AddonModChoiceOption[] = [];
-    selectedOption: {id: number} = { id: -1 };
+    selectedOption: { id: number } = { id: -1 };
     showPreview = false;
     showResultsMessage = false;
     canEdit = false;
     canDelete = false;
     canSeeResults = false;
+    showResultsLoading = true;
     data: number[] = [];
     labels: string[] = [];
     results: AddonModChoiceResultFormatted[] = [];
     publishInfo?: string; // Message explaining the user what will happen with his choices.
 
+    groupsSupported = false;
+    groupId = 0;
+    groupInfo?: CoreGroupInfo;
+    userResponse?: AddonModChoiceUserResponseOption[];
+
     protected userId?: number;
     protected syncEventName = ADDON_MOD_CHOICE_AUTO_SYNCED;
     protected hasAnsweredOnline = false;
-    protected now = CoreTimeUtils.timestamp();
-
-    constructor(
-        protected content?: IonContent,
-        @Optional() courseContentsPage?: CoreCourseContentsPage,
-    ) {
-        super('AddonModChoiceIndexComponent', content, courseContentsPage);
-    }
+    protected now = CoreTime.timestamp();
 
     /**
      * @inheritdoc
@@ -88,7 +96,11 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
 
         this.userId = CoreSites.getCurrentSiteUserId();
 
-        await this.loadContent(false, true);
+        try {
+            await this.loadContent(false, true);
+        } finally {
+            this.showResultsLoading = false;
+        }
     }
 
     /**
@@ -111,7 +123,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
      * @inheritdoc
      */
     protected isRefreshSyncNeeded(syncEventData: AddonModChoiceAutoSyncData): boolean {
-        if (this.choice && syncEventData.choiceId == this.choice.id && syncEventData.userId == this.userId) {
+        if (this.choice && syncEventData.choiceId === this.choice.id && syncEventData.userId === this.userId) {
             this.content?.scrollToTop();
 
             return true;
@@ -124,7 +136,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
      * @inheritdoc
      */
     protected async fetchContent(refresh?: boolean, sync = false, showErrors = false): Promise<void> {
-        this.now = CoreTimeUtils.timestamp();
+        this.now = CoreTime.timestamp();
 
         this.choice = await AddonModChoice.getChoice(this.courseId, this.module.id);
 
@@ -148,14 +160,13 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
         // We need fetchOptions to finish before calling fetchResults because it needs hasAnsweredOnline variable.
         await this.fetchOptions(this.choice);
 
-        await this.fetchResults(this.choice);
+        await this.fetchGroupsAndResults(this.choice);
     }
 
     /**
      * Convenience function to get choice options.
      *
      * @param choice Choice data.
-     * @returns Promise resolved when done.
      */
     protected async fetchOptions(choice: AddonModChoiceChoice): Promise<void> {
         let options = await AddonModChoice.getOptions(choice.id, { cmId: this.module.id });
@@ -194,6 +205,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
      * Set publish info message.
      *
      * @param choice Choice data.
+     * @param hasAnswered Whether the user has answered the choice or not.
      */
     protected setPublishInfo(choice: AddonModChoiceChoice, hasAnswered: boolean): void {
         const choiceOpen = !AddonModChoice.choiceHasBeenOpened(choice, this.now) &&
@@ -251,7 +263,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
     ): Promise<AddonModChoiceOption[]> {
         const response = await AddonModChoiceOffline.getResponse(choice.id);
 
-        const optionsMap: {[id: number]: AddonModChoiceOption} = {};
+        const optionsMap: { [id: number]: AddonModChoiceOption } = {};
         options.forEach((option) => {
             optionsMap[option.id] = option;
         });
@@ -298,10 +310,32 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
     }
 
     /**
+     * Fetch group info if needed and choice results.
+     *
+     * @param choice Choice instance.
+     */
+    protected async fetchGroupsAndResults(choice: AddonModChoiceChoice): Promise<void> {
+        if (!AddonModChoice.choiceHasBeenOpened(choice, this.now)) {
+            // Cannot see results yet.
+            this.canSeeResults = false;
+
+            return;
+        }
+
+        this.groupsSupported = await AddonModChoice.areGroupsSupported();
+        if (this.groupsSupported) {
+            this.groupInfo = await CoreGroups.getActivityGroupInfo(this.module.id, false);
+
+            this.groupId = CoreGroups.validateGroupId(this.groupId, this.groupInfo);
+        }
+
+        await this.fetchResults(choice);
+    }
+
+    /**
      * Convenience function to get choice results.
      *
      * @param choice Choice.
-     * @returns Resolved when done.
      */
     protected async fetchResults(choice: AddonModChoiceChoice): Promise<void> {
         if (!AddonModChoice.choiceHasBeenOpened(choice, this.now)) {
@@ -311,13 +345,16 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
             return;
         }
 
-        const results = await AddonModChoice.getResults(choice.id, { cmId: this.module.id });
+        const results = await AddonModChoice.getResults(choice.id, {
+            cmId: this.module.id,
+            groupId: this.groupId,
+        });
 
         let hasVotes = false;
         this.data = [];
         this.labels = [];
 
-        this.results = results.map<AddonModChoiceResultFormatted>((result) => {
+        this.results = results.options.map<AddonModChoiceResultFormatted>((result) => {
             if (result.numberofuser > 0) {
                 hasVotes = true;
             }
@@ -326,6 +363,20 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
 
             return Object.assign(result, { percentageamountfixed: result.percentageamount.toFixed(1) });
         });
+
+        const site = CoreSites.getRequiredCurrentSite();
+        if (results.userresponse) {
+            this.userResponse = results.userresponse;
+        } else if (this.results.length && !this.showPreview && !site.isVersionGreaterEqualThan('5.2')) {
+            // Workaround of MDL-86932.
+            // Show the user choice when the results are not anonymous. It does not cover the anonymous case.
+            this.userResponse = this.results
+                .filter((result) => result.id > 0 && result.userresponses.some((response) => response.userid === this.userId))
+                .map<AddonModChoiceUserResponseOption>((result) => ({
+                    optionid: result.id,
+                    text: result.text,
+                }));
+        }
 
         this.canSeeResults = hasVotes || AddonModChoice.canStudentSeeResults(choice, this.hasAnsweredOnline, this.now);
     }
@@ -346,7 +397,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
     /**
      * Return true if the user has selected at least one option.
      *
-     * @returns True if the user has responded.
+     * @returns Whether the user has responded.
      */
     canSave(): boolean {
         if (!this.choice) {
@@ -370,7 +421,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
 
         // Only show confirm if choice doesn't allow update.
         if (!this.choice.allowupdate) {
-            await CoreDomUtils.showConfirm(Translate.instant('core.areyousure'));
+            await CoreAlerts.confirm(Translate.instant('core.areyousure'));
         }
 
         const responses: number[] = [];
@@ -401,7 +452,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
 
             await this.dataUpdated(online);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.mod_choice.cannotsubmit', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.mod_choice.cannotsubmit') });
         } finally {
             modal.dismiss();
         }
@@ -416,7 +467,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
         }
 
         try {
-            await CoreDomUtils.showDeleteConfirm();
+            await CoreAlerts.confirmDelete(Translate.instant('core.areyousure'));
         } catch {
             // User cancelled.
             return;
@@ -434,7 +485,7 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
             // Refresh the data. Don't call dataUpdated because deleting an answer doesn't mark the choice as outdated.
             await this.refreshContent(false);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.mod_choice.cannotsubmit', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.mod_choice.cannotsubmit') });
         } finally {
             modal.dismiss();
         }
@@ -444,23 +495,26 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
      * Function to call when some data has changed. It will refresh/prefetch data.
      *
      * @param online Whether the data was sent to server or stored in offline.
-     * @returns Promise resolved when done.
      */
     protected async dataUpdated(online: boolean): Promise<void> {
         if (!online || !this.isPrefetched()) {
             // Not downloaded, just refresh the data.
-            return this.refreshContent(false);
+            await this.refreshContent(false);
+
+            return;
         }
 
         try {
             // The choice is downloaded, update the data.
-            await AddonModChoiceSync.prefetchAfterUpdate(AddonModChoicePrefetchHandler.instance, this.module, this.courseId);
+            await AddonModChoiceSync.prefetchModuleAfterUpdate(this.module, this.courseId);
 
             // Update the view.
             this.showLoadingAndFetch(false, false);
         } catch {
             // Prefetch failed, refresh the data.
-            return this.refreshContent(false);
+            await this.refreshContent(false);
+
+            return;
         }
     }
 
@@ -482,6 +536,25 @@ export class AddonModChoiceIndexComponent extends CoreCourseModuleMainActivityCo
         }
 
         return AddonModChoiceSync.syncChoice(this.choice.id, this.userId);
+    }
+
+    /**
+     * Group changed, reload some data.
+     */
+    async groupChanged(): Promise<void> {
+        if (!this.choice) {
+            return;
+        }
+
+        this.showResultsLoading = true;
+
+        try {
+            await this.fetchResults(this.choice);
+        } catch (error) {
+            CoreAlerts.showError(error);
+        } finally {
+            this.showResultsLoading = false;
+        }
     }
 
 }

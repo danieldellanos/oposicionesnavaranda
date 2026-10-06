@@ -17,10 +17,10 @@ import { CoreFileUploader } from '@features/fileuploader/services/fileuploader';
 import { CoreFile } from '@services/file';
 import { CoreFileEntry } from '@services/file-helper';
 import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { makeSingleton } from '@singletons';
-import { CoreObject } from '@singletons/object';
-import { CorePath } from '@singletons/path';
+import { CoreObject } from '@static/object';
+import { CorePath } from '@static/path';
 import { AddonBlogFilter } from './blog';
 import {
     AddonBlogOfflineEntryDBRecord,
@@ -50,7 +50,9 @@ export class AddonBlogOfflineService {
     /**
      * Mark entry to be removed.
      *
-     * @param id Entry ID.
+     * @param params Entry params to mark as removed.
+     * @param params.id Entry ID.
+     * @param params.subject Entry subject.
      * @param siteId Site ID.
      *
      * @returns Promise resolved if stored, rejected if failure.
@@ -102,13 +104,15 @@ export class AddonBlogOfflineService {
     /**
      * Retrieves if there are any offline entry.
      *
-     * @param filter Entry id.
-     *
+     * @param filter Entry filter.
+     * @param filter.id Entry ID.
+     * @param filter.created Entry creation date.
+     * @param siteId Site ID. If not defined, current site.
      * @returns Has offline entries.
      */
     async getOfflineEntry(filter: { id?: number; created?: number }, siteId?: string): Promise<AddonBlogOfflineEntry | undefined> {
         const site = await CoreSites.getSite(siteId);
-        const record = await CoreUtils.ignoreErrors(
+        const record = await CorePromiseUtils.ignoreErrors(
             site.getDb().getRecord<AddonBlogOfflineEntry>(OFFLINE_BLOG_ENTRIES_TABLE_NAME, filter),
         );
 
@@ -148,14 +152,15 @@ export class AddonBlogOfflineService {
      * Get offline entry files folder path.
      *
      * @param params Entry creation date or entry ID.
+     * @param siteId Site ID. If not defined, current site.
      * @returns path.
      */
     async getOfflineEntryFilesFolderPath(params: AddonBlogOfflineParams, siteId?: string): Promise<string> {
         const site = await CoreSites.getSite(siteId);
         const siteFolderPath = CoreFile.getSiteFolder(site.id);
-        const folder = 'created' in params ? 'created-' + params.created : params.id;
+        const folder = 'created' in params ? `created-${params.created}` : params.id;
 
-        return CorePath.concatenatePaths(siteFolderPath, 'offlineblog/' + folder);
+        return CorePath.concatenatePaths(siteFolderPath, `offlineblog/${folder}`);
     }
 
     /**
@@ -170,7 +175,7 @@ export class AddonBlogOfflineService {
             const folderPath = await AddonBlogOffline.getOfflineEntryFilesFolderPath(folderName, siteId);
 
             return await CoreFileUploader.getStoredFiles(folderPath);
-        } catch (error) {
+        } catch {
             return [];
         }
     }

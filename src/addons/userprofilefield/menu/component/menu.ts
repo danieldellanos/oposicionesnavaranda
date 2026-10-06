@@ -14,8 +14,9 @@
 
 import { Component } from '@angular/core';
 
-import { AuthEmailSignupProfileField } from '@features/login/services/login-helper';
+import { AuthEmailSignupProfileField } from '@features/login/services/signup';
 import { CoreUserProfileFieldBaseComponent } from '@features/user/classes/base-profilefield-component';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Directive to render a menu user profile field.
@@ -23,16 +24,17 @@ import { CoreUserProfileFieldBaseComponent } from '@features/user/classes/base-p
 @Component({
     selector: 'addon-user-profile-field-menu',
     templateUrl: 'addon-user-profile-field-menu.html',
-    styleUrls: ['./menu.scss'],
+    styleUrl: './menu.scss',
+    imports: [
+        CoreSharedModule,
+    ],
 })
 export class AddonUserProfileFieldMenuComponent extends CoreUserProfileFieldBaseComponent {
 
     options?: string[];
 
     /**
-     * Init the data when the field is meant to be displayed for editing.
-     *
-     * @param field Field to render.
+     * @inheritdoc
      */
     protected initForEdit(field: AuthEmailSignupProfileField): void {
         super.initForEdit(field);

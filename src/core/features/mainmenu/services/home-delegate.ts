@@ -27,7 +27,7 @@ export type CoreMainMenuHomeHandler = CoreDelegateDisplayHandler<CoreMainMenuHom
 /**
  * Data needed to render a main menu handler. It's returned by the handler.
  */
-export interface CoreMainMenuHomeHandlerData {
+export type CoreMainMenuHomeHandlerData = {
     /**
      * Name of the page to load for the handler.
      */
@@ -67,12 +67,19 @@ export interface CoreMainMenuHomeHandlerData {
      * Name of the icon to display for the handler.
      */
     icon?: string; // Name of the icon to display in the tab.
-}
+
+    /**
+     * If tab is enabled or not. When disabled, tab will be hidden.
+     * This is necessary to manage swiper when tabs are hidden.
+     * If tab is hidden using CSS, but enabled the lateral buttons won't work properly.
+     */
+    enabled?: boolean;
+};
 
 /**
  * Data returned by the delegate for each handler.
  */
-export interface CoreMainMenuHomeHandlerToDisplay extends CoreDelegateToDisplay, CoreMainMenuHomeHandlerData {}
+export type CoreMainMenuHomeHandlerToDisplay = CoreDelegateToDisplay & CoreMainMenuHomeHandlerData;
 
 /**
  * Service to interact with plugins to be shown in the main menu. Provides functions to register a plugin
@@ -82,10 +89,6 @@ export interface CoreMainMenuHomeHandlerToDisplay extends CoreDelegateToDisplay,
 export class CoreMainMenuHomeDelegateService extends CoreSortedDelegate<CoreMainMenuHomeHandlerToDisplay, CoreMainMenuHomeHandler> {
 
     protected featurePrefix = 'CoreMainMenuHomeDelegate_';
-
-    constructor() {
-        super('CoreMainMenuHomeDelegate');
-    }
 
 }
 

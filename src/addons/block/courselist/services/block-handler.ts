@@ -14,9 +14,10 @@
 
 import { Injectable } from '@angular/core';
 import { CoreBlockHandlerData } from '@features/block/services/block-delegate';
-import { CoreBlockOnlyTitleComponent } from '@features/block/components/only-title-block/only-title-block';
 import { CoreBlockBaseHandler } from '@features/block/classes/base-block-handler';
 import { makeSingleton } from '@singletons';
+import { CoreCourses } from '@features/courses/services/courses';
+import { CoreSites } from '@services/sites';
 
 /**
  * Block handler.
@@ -30,7 +31,24 @@ export class AddonBlockCourseListHandlerService extends CoreBlockBaseHandler {
     /**
      * @inheritdoc
      */
-    getDisplayData(): CoreBlockHandlerData {
+    async getDisplayData(): Promise<CoreBlockHandlerData> {
+        const { CoreBlockOnlyTitleComponent } = await import('@features/block/components/only-title-block/only-title-block');
+
+        let showCategories = CoreSites.getRequiredCurrentSite().isAdmin();
+        if (!showCategories) {
+            const courses = await CoreCourses.getUserCourses();
+
+            showCategories = courses.length === 0;
+        }
+
+        if (showCategories) { // Admins and users without courses, show categories.
+            return {
+                title: 'core.courses.categories',
+                class: 'addon-block-course-list',
+                component: CoreBlockOnlyTitleComponent,
+                link: 'courses/categories',
+            };
+        }
 
         return {
             title: 'core.courses.mycourses',
@@ -38,9 +56,6 @@ export class AddonBlockCourseListHandlerService extends CoreBlockBaseHandler {
             component: CoreBlockOnlyTitleComponent,
             link: 'courses/list',
             linkParams: { mode: 'my' },
-            navOptions: {
-                preferCurrentTab: false,
-            },
         };
     }
 

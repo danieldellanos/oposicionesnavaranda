@@ -15,12 +15,14 @@
 import { Component, OnInit } from '@angular/core';
 import { CoreGroupInfo, CoreGroups } from '@services/groups';
 import { CoreNavigator } from '@services/navigator';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { AddonModFeedback, AddonModFeedbackWSFeedback } from '../../services/feedback';
 import { AddonModFeedbackHelper, AddonModFeedbackNonRespondent } from '../../services/feedback-helper';
-import { CoreTime } from '@singletons/time';
+import { CoreTime } from '@static/time';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { Translate } from '@singletons';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Page that displays feedback non respondents.
@@ -28,8 +30,11 @@ import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
 @Component({
     selector: 'page-addon-mod-feedback-nonrespondents',
     templateUrl: 'nonrespondents.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class AddonModFeedbackNonRespondentsPage implements OnInit {
+export default class AddonModFeedbackNonRespondentsPage implements OnInit {
 
     protected cmId!: number;
     protected feedback?: AddonModFeedbackWSFeedback;
@@ -70,8 +75,7 @@ export class AddonModFeedbackNonRespondentsPage implements OnInit {
             this.courseId = CoreNavigator.getRequiredRouteNumberParam('courseId');
             this.selectedGroup = CoreNavigator.getRouteNumberParam('group') || 0;
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
-
+            CoreAlerts.showError(error);
             CoreNavigator.back();
 
             return;
@@ -86,7 +90,7 @@ export class AddonModFeedbackNonRespondentsPage implements OnInit {
      * @param refresh Empty events array first.
      * @returns Promise resolved when done.
      */
-    protected async fetchData(refresh: boolean = false): Promise<void> {
+    protected async fetchData(refresh = false): Promise<void> {
         this.page = 0;
         this.total = 0;
         this.users = [];
@@ -102,7 +106,7 @@ export class AddonModFeedbackNonRespondentsPage implements OnInit {
 
             this.logView();
         } catch (message) {
-            CoreDomUtils.showErrorModalDefault(message, 'core.course.errorgetmodule', true);
+            CoreAlerts.showError(message, { default: Translate.instant('core.course.errorgetmodule') });
 
             if (!refresh) {
                 // Some call failed on first fetch, go back.
@@ -162,7 +166,7 @@ export class AddonModFeedbackNonRespondentsPage implements OnInit {
         try {
             await this.loadGroupUsers(groupId);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'core.course.errorgetmodule', true);
+            CoreAlerts.showError(error, { default: Translate.instant('core.course.errorgetmodule') });
         } finally {
             infiniteComplete && infiniteComplete();
         }
@@ -182,7 +186,7 @@ export class AddonModFeedbackNonRespondentsPage implements OnInit {
                 promises.push(AddonModFeedback.invalidateNonRespondentsData(this.feedback.id));
             }
 
-            await CoreUtils.ignoreErrors(Promise.all(promises));
+            await CorePromiseUtils.ignoreErrors(Promise.all(promises));
 
             await this.fetchData(true);
         } finally {

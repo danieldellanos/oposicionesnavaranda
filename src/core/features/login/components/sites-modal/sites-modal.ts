@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreDomUtils } from '@services/utils/dom';
 import { Component, OnInit } from '@angular/core';
-
 import { CoreSiteBasicInfo, CoreSites } from '@services/sites';
 import { CoreAccountsList, CoreLoginHelper } from '@features/login/services/login-helper';
 import { CoreNavigator } from '@services/navigator';
 import { CoreFilter } from '@features/filter/services/filter';
-import { CoreAnimations } from '@components/animations';
-import { ModalController } from '@singletons';
+import { ModalController, Translate } from '@singletons';
 import { CoreSharedModule } from '@/core/shared.module';
+import { CoreAlerts } from '@services/overlays/alerts';
 
 /**
  * Modal that displays a list of sites to be able to enter or delete a site.
@@ -29,8 +27,6 @@ import { CoreSharedModule } from '@/core/shared.module';
 @Component({
     selector: 'core-login-sites-modal',
     templateUrl: 'sites-modal.html',
-    animations: [CoreAnimations.SLIDE_IN_OUT, CoreAnimations.SHOW_HIDE],
-    standalone: true,
     imports: [
         CoreSharedModule,
     ],
@@ -75,7 +71,6 @@ export class CoreLoginSitesModalComponent implements OnInit {
      *
      * @param event Click event.
      * @param site Site to delete.
-     * @returns Promise resolved when done.
      */
     async deleteSite(event: Event, site: CoreSiteBasicInfo): Promise<void> {
         event.stopPropagation();
@@ -85,7 +80,7 @@ export class CoreLoginSitesModalComponent implements OnInit {
         siteName = await CoreFilter.formatText(siteName, { clean: true, singleLine: true, filter: false }, [], site.id);
 
         try {
-            await CoreDomUtils.showDeleteConfirm('core.login.confirmdeletesite', { sitename: siteName });
+            await CoreAlerts.confirmDelete(Translate.instant('core.login.confirmdeletesite', { sitename: siteName }));
         } catch {
             // User cancelled, stop.
             return;
@@ -96,7 +91,7 @@ export class CoreLoginSitesModalComponent implements OnInit {
 
             this.showDelete = false;
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'core.login.errordeletesite', true);
+            CoreAlerts.showError(error, { default: Translate.instant('core.login.errordeletesite') });
         }
     }
 
@@ -104,7 +99,6 @@ export class CoreLoginSitesModalComponent implements OnInit {
      * Login in a site.
      *
      * @param site The site.
-     * @returns Promise resolved when done.
      */
     async login(site: CoreSiteBasicInfo): Promise<void> {
         await this.close(undefined, true);
@@ -124,6 +118,7 @@ export class CoreLoginSitesModalComponent implements OnInit {
      * Close modal.
      *
      * @param event Click event.
+     * @param closeAll Whether to close all modals or just the current one.
      */
     async close(event?: Event, closeAll = false): Promise<void> {
         event?.preventDefault();

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { CoreDashboardHomeHandler } from '@features/courses/services/handlers/dashboard-home';
-import { CoreSiteHomeHomeHandler } from '@features/sitehome/services/handlers/sitehome-home';
-import { CoreSites } from '@services/sites';
 import { makeSingleton } from '@singletons';
-import { CoreMainMenuHandler, CoreMainMenuHandlerData } from '../mainmenu-delegate';
+import { CoreMainMenuHomeDelegate } from '../home-delegate';
+import { CoreMainMenuHandler, CoreMainMenuPageNavHandlerData } from '../mainmenu-delegate';
+import { CORE_HOME_COMPONENT_NAME, MAIN_MENU_HOME_PAGE_NAME } from '@features/mainmenu/constants';
 
 /**
  * Handler to add Home into main menu.
@@ -25,31 +24,26 @@ import { CoreMainMenuHandler, CoreMainMenuHandlerData } from '../mainmenu-delega
 @Injectable({ providedIn: 'root' })
 export class CoreMainMenuHomeHandlerService implements CoreMainMenuHandler {
 
-    static readonly PAGE_NAME = 'home';
-
-    name = 'CoreHome';
+    name = CORE_HOME_COMPONENT_NAME;
     priority = 1000;
 
     /**
      * @inheritdoc
      */
     async isEnabled(): Promise<boolean> {
-        const siteId = CoreSites.getCurrentSiteId();
+        await CoreMainMenuHomeDelegate.waitForReady();
 
-        const dashboardEnabled = await CoreDashboardHomeHandler.isEnabledForSite(siteId);
-        const siteHomeEnabled = await CoreSiteHomeHomeHandler.isEnabledForSite(siteId);
-
-        return dashboardEnabled || siteHomeEnabled;
+        return CoreMainMenuHomeDelegate.hasHandlers(true);
     }
 
     /**
      * @inheritdoc
      */
-    getDisplayData(): CoreMainMenuHandlerData {
+    getDisplayData(): CoreMainMenuPageNavHandlerData {
         return {
             icon: 'fas-gauge-high',
             title: 'core.mainmenu.home',
-            page: CoreMainMenuHomeHandlerService.PAGE_NAME,
+            page: MAIN_MENU_HOME_PAGE_NAME,
             class: 'core-home-handler',
         };
     }

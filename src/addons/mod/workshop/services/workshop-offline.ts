@@ -16,11 +16,11 @@ import { Injectable } from '@angular/core';
 import { CoreFileUploaderStoreFilesResult } from '@features/fileuploader/services/fileuploader';
 import { CoreFile } from '@services/file';
 import { CoreSites } from '@services/sites';
-import { CoreText } from '@singletons/text';
-import { CoreTimeUtils } from '@services/utils/time';
+import { CoreText } from '@static/text';
+import { CoreTime } from '@static/time';
 import { makeSingleton } from '@singletons';
-import { CoreFormFields } from '@singletons/form';
-import { CorePath } from '@singletons/path';
+import { CoreFormFields } from '@static/form';
+import { CorePath } from '@static/path';
 import {
     AddonModWorkshopAssessmentDBRecord,
     AddonModWorkshopEvaluateAssessmentDBRecord,
@@ -214,7 +214,7 @@ export class AddonModWorkshopOfflineProvider {
 
         const site = await CoreSites.getSite(siteId);
 
-        const timemodified = CoreTimeUtils.timestamp();
+        const timemodified = CoreTime.timestamp();
 
         const submission: AddonModWorkshopSubmissionDBRecord = {
             workshopid: workshopId,
@@ -340,7 +340,7 @@ export class AddonModWorkshopOfflineProvider {
             courseid: courseId,
             inputdata: JSON.stringify(inputData),
             assessmentid: assessmentId,
-            timemodified: CoreTimeUtils.timestamp(),
+            timemodified: CoreTime.timestamp(),
         };
 
         await site.getDb().insertRecord(ASSESSMENTS_TABLE, assessment);
@@ -465,7 +465,7 @@ export class AddonModWorkshopOfflineProvider {
             workshopid: workshopId,
             courseid: courseId,
             submissionid: submissionId,
-            timemodified: CoreTimeUtils.timestamp(),
+            timemodified: CoreTime.timestamp(),
             feedbacktext: feedbackText,
             published: Number(published),
             gradeover: JSON.stringify(gradeOver),
@@ -596,7 +596,7 @@ export class AddonModWorkshopOfflineProvider {
             workshopid: workshopId,
             courseid: courseId,
             assessmentid: assessmentId,
-            timemodified: CoreTimeUtils.timestamp(),
+            timemodified: CoreTime.timestamp(),
             feedbacktext: feedbackText || '',
             weight: weight,
             gradinggradeover: JSON.stringify(gradingGradeOver),
@@ -631,7 +631,7 @@ export class AddonModWorkshopOfflineProvider {
         const site = await CoreSites.getSite(siteId);
 
         const siteFolderPath = CoreFile.getSiteFolder(site.getId());
-        const workshopFolderPath = 'offlineworkshop/' + workshopId + '/';
+        const workshopFolderPath = `offlineworkshop/${workshopId}/`;
 
         return CorePath.concatenatePaths(siteFolderPath, workshopFolderPath);
     }

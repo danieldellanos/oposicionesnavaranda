@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/* eslint-disable deprecation/deprecation */
+/* eslint-disable @typescript-eslint/no-deprecated */
 
+import { CoreBytesConstants } from '@/core/constants';
 import { Injectable } from '@angular/core';
 import {
     File,
@@ -25,7 +26,7 @@ import {
     DirectoryEntry,
     DirectoryReader,
 } from '@awesome-cordova-plugins/file/ngx';
-import { CorePath } from '@singletons/path';
+import { CorePath } from '@static/path';
 
 /**
  * Implement the File Error because the ionic-native plugin doesn't implement it.
@@ -57,6 +58,7 @@ class FileError {
  * Native APIs used in webkit window.
  *
  * @deprecated since 4.4
+ * This code will be removed when migrating to Capacitor.
  */
 interface WebkitWindow {
 
@@ -66,8 +68,8 @@ interface WebkitWindow {
      */
     // eslint-disable-next-line @typescript-eslint/naming-convention
     LocalFileSystem: {
-        readonly TEMPORARY: number;
-        readonly PERSISTENT: number;
+        readonly TEMPORARY: number; // eslint-disable-line @typescript-eslint/naming-convention
+        readonly PERSISTENT: number; // eslint-disable-line @typescript-eslint/naming-convention
     };
 
     /**
@@ -109,27 +111,6 @@ interface WebkitWindow {
         successCallback: (entry: Entry) => void,
         errorCallback?: (fileError: FileError) => void,
     ): void;
-
-}
-
-/**
- * Native APIs used in webkit navigator.
- *
- * @deprecated since 4.4
- */
-interface WebkitNavigator {
-
-    /**
-     * @deprecated since 4.4
-     * @see https://developer.chrome.com/docs/apps/offline_storage/
-     */
-    webkitPersistentStorage: {
-        requestQuota(
-            newQuotaInBytes: number,
-            successCallback?: (bytesGranted: number) => void,
-            errorCallback?: (error: Error) => void,
-        ): void;
-    };
 
 }
 
@@ -314,7 +295,7 @@ export class FileMock extends File {
     private fillErrorMessageMock(error: FileError): void {
         try {
             error.message = this.cordovaFileError[error.code];
-        } catch (e) {
+        } catch {
             // Ignore errors.
         }
     }
@@ -375,41 +356,12 @@ export class FileMock extends File {
      * @returns Promise resolved with the free space.
      */
     async getFreeDiskSpace(): Promise<number> {
-        // Request a file system instance with a minimum size until we get an error.
-        const window = this.getEmulatorWindow();
-
-        if (!window.requestFileSystem) {
+        const estimate = await navigator.storage.estimate();
+        if (!estimate.quota || !estimate.usage) {
             throw new Error('File system not available.');
         }
 
-        let iterations = 0;
-        let maxIterations = 50;
-        const calculateByRequest = (size: number, ratio: number): Promise<number> =>
-            new Promise((resolve): void => {
-                window.requestFileSystem(LocalFileSystem.PERSISTENT, size, () => {
-                    iterations++;
-                    if (iterations > maxIterations) {
-                        resolve(size);
-
-                        return;
-                    }
-                    // eslint-disable-next-line promise/catch-or-return
-                    calculateByRequest(size * ratio, ratio).then(resolve);
-                }, () => {
-                    resolve(size / ratio);
-                });
-            });
-
-        // General calculation, base 1MB and increasing factor 1.3.
-        let size = await calculateByRequest(1048576, 1.3);
-
-        // More accurate. Factor is 1.1.
-        iterations = 0;
-        maxIterations = 10;
-
-        size = await calculateByRequest(size, 1.1);
-
-        return size / 1024; // Return size in KB.
+        return (estimate.quota - estimate.usage) / CoreBytesConstants.KILOBYTE;
     }
 
     /**
@@ -447,12 +399,23 @@ export class FileMock extends File {
                 PERSISTENT: 1, // eslint-disable-line @typescript-eslint/naming-convention
             };
 
-            // Request a quota to use. Request 500MB.
-            this.getEmulatorNavigator().webkitPersistentStorage.requestQuota(500 * 1024 * 1024, (granted) => {
-                window.requestFileSystem(LocalFileSystem.PERSISTENT, granted, (fileSystem: FileSystem) => {
+            // Request a quota to use.
+            navigator.storage.estimate().then((estimated) => {
+                const quota = estimated.quota;
+                if (!quota) {
+                    reject();
+
+                    return;
+                }
+
+                window.requestFileSystem(LocalFileSystem.PERSISTENT, quota, (fileSystem: FileSystem) => {
                     resolve(fileSystem.root.toURL());
                 }, reject);
-            }, reject);
+
+                return;
+            }).catch(() => {
+                reject();
+            });
         });
     }
 
@@ -530,7 +493,7 @@ export class FileMock extends File {
      * @param name Name to fix.
      * @returns Fixed values.
      */
-    protected fixPathAndName(path: string, name: string): {path: string; name: string} {
+    protected fixPathAndName(path: string, name: string): { path: string; name: string } {
 
         const fullPath = CorePath.concatenatePaths(path, name);
 
@@ -558,6 +521,7 @@ export class FileMock extends File {
      * @param path Base FileSystem.
      * @param file Name of file, relative to path.
      * @returns Returns a Promise that resolves with the contents of the file as string rejects with an error.
+     * @deprecated see https://developer.mozilla.org/en-US/docs/Web/API/FileReader/readAsBinaryString
      */
     readAsBinaryString(path: string, file: string): Promise<string> {
         return this.readFileMock<string>(path, file, 'BinaryString');
@@ -872,7 +836,7 @@ export class FileMock extends File {
      */
     private writeFileInChunksMock(writer: FileWriter, data: Blob): Promise<void> {
         let writtenSize = 0;
-        const BLOCK_SIZE = 1024 * 1024;
+        const BLOCK_SIZE = CoreBytesConstants.MEGABYTE;
         const writeNextChunk = () => {
             const size = Math.min(BLOCK_SIZE, data.size - writtenSize);
             const chunk = data.slice(writtenSize, writtenSize + size);
@@ -901,15 +865,6 @@ export class FileMock extends File {
      */
     private getEmulatorWindow(): WebkitWindow {
         return window as unknown as WebkitWindow;
-    }
-
-    /**
-     * Get emulator navigator.
-     *
-     * @returns Emulator navigator.
-     */
-    private getEmulatorNavigator(): WebkitNavigator {
-        return navigator as unknown as WebkitNavigator;
     }
 
 }

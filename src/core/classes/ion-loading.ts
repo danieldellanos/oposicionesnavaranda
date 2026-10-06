@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreWait } from '@singletons/wait';
+import { CoreWait } from '@static/wait';
 import { LoadingController } from '@singletons';
+import { CoreToasts } from '@services/overlays/toasts';
 
 /**
  * Dismiss listener.
@@ -66,6 +67,23 @@ export class CoreIonLoadingElement {
         await loadingElement.dismiss(data, role);
 
         this.listeners.forEach(listener => listener());
+    }
+
+    /**
+     * Dismiss the loading element and present a status message for screen readers.
+     *
+     * @param text Status message for screen readers.
+     * @param needsTranslate Whether the 'text' needs to be translated.
+     */
+    async dismissWithStatus(text: string, needsTranslate?: boolean): Promise<void> {
+        await Promise.all([
+            this.dismiss(),
+            CoreToasts.show({
+               cssClass: 'sr-only',
+                message: text,
+                translateMessage: needsTranslate,
+            }),
+        ]);
     }
 
     /**

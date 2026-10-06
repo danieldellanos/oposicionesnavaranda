@@ -14,16 +14,21 @@
 
 import { Injectable } from '@angular/core';
 
-import { CoreLang, CoreLangFormat, CoreLangLanguage } from '@services/lang';
 import { CoreSites } from '@services/sites';
-import { CoreConstants } from '@/core/constants';
-import { CoreMainMenuDelegate, CoreMainMenuHandlerToDisplay } from './mainmenu-delegate';
-import { Device, makeSingleton } from '@singletons';
-import { CoreText } from '@singletons/text';
+import { CoreMainMenuDelegate, CoreMainMenuPageNavHandlerToDisplay } from './mainmenu-delegate';
+import { makeSingleton } from '@singletons';
 import { CoreScreen } from '@services/screen';
-import { CorePlatform } from '@services/platform';
+import {
+    CoreMainMenuPlacement,
+    MAIN_MENU_HANDLER_BADGE_UPDATED_EVENT,
+    MAIN_MENU_ITEM_MIN_WIDTH,
+    MAIN_MENU_MORE_PAGE_NAME,
+    MAIN_MENU_NUM_MAIN_HANDLERS,
+    MAIN_MENU_VISIBILITY_UPDATED_EVENT,
+} from '../constants';
+import { CoreCustomMenuItem } from './custommenu';
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -31,8 +36,8 @@ declare module '@singletons/events' {
      * @see https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation
      */
     export interface CoreEventsData {
-        [CoreMainMenuProvider.MAIN_MENU_HANDLER_BADGE_UPDATED]: CoreMainMenuHandlerBadgeUpdatedEventData;
-        [CoreMainMenuProvider.MAIN_MENU_VISIBILITY_UPDATED]: void;
+        [MAIN_MENU_HANDLER_BADGE_UPDATED_EVENT]: CoreMainMenuHandlerBadgeUpdatedEventData;
+        [MAIN_MENU_VISIBILITY_UPDATED_EVENT]: void;
     }
 
 }
@@ -43,21 +48,36 @@ declare module '@singletons/events' {
 @Injectable({ providedIn: 'root' })
 export class CoreMainMenuProvider {
 
-    static readonly NUM_MAIN_HANDLERS = 4;
-    static readonly ITEM_MIN_WIDTH = 72; // Min with of every item, based on 5 items on a 360 pixel wide screen.
-    static readonly MORE_PAGE_NAME = 'more';
-    static readonly MAIN_MENU_HANDLER_BADGE_UPDATED = 'main_menu_handler_badge_updated';
-    static readonly MAIN_MENU_VISIBILITY_UPDATED = 'main_menu_visbility_updated';
+    /**
+     * @deprecated since 5.0. Use MAIN_MENU_NUM_MAIN_HANDLERS instead.
+     */
+    static readonly NUM_MAIN_HANDLERS = MAIN_MENU_NUM_MAIN_HANDLERS;
+    /**
+     * @deprecated since 5.0. Use MAIN_MENU_ITEM_MIN_WIDTH instead.
+     */
+    static readonly ITEM_MIN_WIDTH = MAIN_MENU_ITEM_MIN_WIDTH;
+    /**
+     * @deprecated since 5.0. Use MAIN_MENU_MORE_PAGE_NAME instead.
+     */
+    static readonly MORE_PAGE_NAME = MAIN_MENU_MORE_PAGE_NAME;
+    /**
+     * @deprecated since 5.0. Use MAIN_MENU_HANDLER_BADGE_UPDATED_EVENT instead.
+     */
+    static readonly MAIN_MENU_HANDLER_BADGE_UPDATED = MAIN_MENU_HANDLER_BADGE_UPDATED_EVENT;
+    /**
+     * @deprecated since 5.0. Use MAIN_MENU_VISIBILITY_UPDATED_EVENT instead.
+     */
+    static readonly MAIN_MENU_VISIBILITY_UPDATED = MAIN_MENU_VISIBILITY_UPDATED_EVENT;
 
     /**
      * Get the current main menu handlers.
      *
      * @returns Promise resolved with the current main menu handlers.
      */
-    async getCurrentMainMenuHandlers(): Promise<CoreMainMenuHandlerToDisplay[]> {
+    async getCurrentMainMenuHandlers(): Promise<CoreMainMenuPageNavHandlerToDisplay[]> {
         const handlers = await CoreMainMenuDelegate.getHandlersWhenLoaded();
 
-        return handlers.filter(handler => !handler.onlyInMore).slice(0, this.getNumItems());
+        return CoreMainMenuDelegate.skipOnlyMoreHandlers(handlers).slice(0, this.getNumItems());
     }
 
     /**
@@ -65,157 +85,13 @@ export class CoreMainMenuProvider {
      *
      * @param siteId Site to get custom items from.
      * @returns List of custom menu items.
-     */
-    async getCustomMenuItems(siteId?: string): Promise<CoreMainMenuCustomItem[]> {
-        const customItems = await Promise.all([
-            this.getCustomMenuItemsFromSite(siteId),
-            this.getCustomItemsFromConfig(),
-        ]);
-
-        return customItems.flat();
-    }
-
-    /**
-     * Get a list of custom menu items for a certain site.
      *
-     * @param siteId Site ID. If not defined, current site.
-     * @returns List of custom menu items.
+     * @deprecated since 5.2. Use CoreCustomMenu.getCustomMenuItems() instead.
      */
-    protected async getCustomMenuItemsFromSite(siteId?: string): Promise<CoreMainMenuCustomItem[]> {
-        const site = await CoreSites.getSite(siteId);
+    async getCustomMenuItems(siteId?: string): Promise<CoreCustomMenuItem[]> {
+        const { CoreCustomMenu } = await import('./custommenu');
 
-        const itemsString = site.getStoredConfig('tool_mobile_custommenuitems');
-        const map: CustomMenuItemsMap = {};
-        const result: CoreMainMenuCustomItem[] = [];
-
-        let position = 0; // Position of each item, to keep the same order as it's configured.
-
-        if (!itemsString || typeof itemsString != 'string') {
-            // Setting not valid.
-            return result;
-        }
-
-        // Add items to the map.
-        const items = itemsString.split(/(?:\r\n|\r|\n)/);
-        items.forEach((item) => {
-            const values = item.split('|');
-            const label = values[0] ? values[0].trim() : values[0];
-            const url = values[1] ? values[1].trim() : values[1];
-            const type = values[2] ? values[2].trim() : values[2];
-            const lang = (values[3] ? values[3].trim() : values[3]) || 'none';
-            let icon = values[4] ? values[4].trim() : values[4];
-
-            if (!label || !url || !type) {
-                // Invalid item, ignore it.
-                return;
-            }
-
-            const id = url + '#' + type;
-            if (!icon) {
-                // Icon not defined, use default one.
-                icon = type == 'embedded' ? 'fas-expand' : 'fas-link'; // @todo Find a better icon for embedded.
-            }
-
-            if (!map[id]) {
-                // New entry, add it to the map.
-                map[id] = {
-                    url: url,
-                    type: type,
-                    position: position,
-                    labels: {},
-                };
-                position++;
-            }
-
-            map[id].labels[lang.toLowerCase()] = {
-                label: label,
-                icon: icon,
-            };
-        });
-
-        if (!position) {
-            // No valid items found, stop.
-            return result;
-        }
-
-        const currentLangApp = await CoreLang.getCurrentLanguage();
-        const currentLangLMS = CoreLang.formatLanguage(currentLangApp, CoreLangFormat.LMS);
-        const fallbackLang = CoreConstants.CONFIG.default_lang || 'en';
-
-        // Get the right label for each entry and add it to the result.
-        for (const id in map) {
-            const entry = map[id];
-            let data = entry.labels[currentLangApp]
-                ?? entry.labels[currentLangLMS]
-                ?? entry.labels[currentLangApp + '_only']
-                ?? entry.labels[currentLangLMS + '_only']
-                ?? entry.labels.none
-                ?? entry.labels[fallbackLang];
-
-            if (!data) {
-                // No valid label found, get the first one that is not "_only".
-                for (const lang in entry.labels) {
-                    if (lang.indexOf('_only') == -1) {
-                        data = entry.labels[lang];
-                        break;
-                    }
-                }
-
-                if (!data) {
-                    // No valid label, ignore this entry.
-                    continue;
-                }
-            }
-
-            result[entry.position] = {
-                url: entry.url,
-                type: entry.type,
-                label: data.label,
-                icon: data.icon,
-            };
-        }
-
-        // Remove undefined values.
-        return result.filter((entry) => entry !== undefined);
-    }
-
-    /**
-     * Get a list of custom menu items from config.
-     *
-     * @returns List of custom menu items.
-     */
-    protected async getCustomItemsFromConfig(): Promise<CoreMainMenuCustomItem[]> {
-        const items = CoreConstants.CONFIG.customMainMenuItems;
-
-        if (!items) {
-            return [];
-        }
-
-        const currentLang = await CoreLang.getCurrentLanguage();
-
-        const fallbackLang = CoreConstants.CONFIG.default_lang || 'en';
-        const replacements = {
-            devicetype: '',
-            osversion: Device.version,
-        };
-
-        if (CorePlatform.isAndroid()) {
-            replacements.devicetype = 'Android';
-        } else if (CorePlatform.isIOS()) {
-            replacements.devicetype = 'iPhone or iPad';
-        } else {
-            replacements.devicetype = 'Other';
-        }
-
-        return items
-            .filter(item => typeof item.label === 'string' || currentLang in item.label || fallbackLang in item.label)
-            .map(item => ({
-                ...item,
-                url: CoreText.replaceArguments(item.url, replacements, 'uri'),
-                label: typeof item.label === 'string'
-                    ? item.label
-                    : item.label[currentLang] ?? item.label[fallbackLang],
-            }));
+        return CoreCustomMenu.getCustomMainMenuItems(siteId);
     }
 
     /**
@@ -229,9 +105,9 @@ export class CoreMainMenuProvider {
 
             if (CoreScreen.isTablet) {
                 // Tablet, menu will be displayed vertically.
-                numElements = Math.floor(window.innerHeight / CoreMainMenuProvider.ITEM_MIN_WIDTH);
+                numElements = Math.floor(window.innerHeight / MAIN_MENU_ITEM_MIN_WIDTH);
             } else {
-                numElements = Math.floor(window.innerWidth / CoreMainMenuProvider.ITEM_MIN_WIDTH);
+                numElements = Math.floor(window.innerWidth / MAIN_MENU_ITEM_MIN_WIDTH);
 
                 // Set a maximum elements to show and skip more button.
                 numElements = numElements >= 5 ? 5 : numElements;
@@ -241,7 +117,7 @@ export class CoreMainMenuProvider {
             return numElements > 1 ? numElements - 1 : 1;
         }
 
-        return CoreMainMenuProvider.NUM_MAIN_HANDLERS;
+        return MAIN_MENU_NUM_MAIN_HANDLERS;
     }
 
     /**
@@ -249,8 +125,8 @@ export class CoreMainMenuProvider {
      *
      * @returns Tabs placement including side value.
      */
-    getTabPlacement(): 'bottom' | 'side' {
-        return CoreScreen.isTablet ? 'side' : 'bottom';
+    getTabPlacement(): CoreMainMenuPlacement {
+        return CoreScreen.isTablet ? CoreMainMenuPlacement.SIDE : CoreMainMenuPlacement.BOTTOM;
     }
 
     /**
@@ -260,7 +136,7 @@ export class CoreMainMenuProvider {
      * @returns Promise resolved with boolean: whether it's the root of a main menu tab.
      */
     async isMainMenuTab(pageName: string): Promise<boolean> {
-        if (pageName == CoreMainMenuProvider.MORE_PAGE_NAME) {
+        if (pageName === MAIN_MENU_MORE_PAGE_NAME) {
             return true;
         }
 
@@ -279,7 +155,7 @@ export class CoreMainMenuProvider {
         const handler = handlers.find((handler) => {
             const tabRoot = /^[^/]+/.exec(handler.page)?.[0] ?? handler.page;
 
-            return tabRoot == pageName;
+            return tabRoot === pageName;
         });
 
         return !!handler;
@@ -300,54 +176,16 @@ export class CoreMainMenuProvider {
 
 export const CoreMainMenu = makeSingleton(CoreMainMenuProvider);
 
-/**
- * Custom main menu item.
- */
-export interface CoreMainMenuCustomItem {
-    /**
-     * Type of the item: app, inappbrowser, browser or embedded.
-     */
-    type: string;
-
-    /**
-     * Url of the item.
-     */
-    url: string;
-
-    /**
-     * Label to display for the item.
-     */
-    label: string;
-
-    /**
-     * Name of the icon to display for the item.
-     */
-    icon: string;
-}
-
-/**
- * Custom main menu item with localized text.
- */
-export type CoreMainMenuLocalizedCustomItem = Omit<CoreMainMenuCustomItem, 'label'> & {
-    label: string | Record<CoreLangLanguage, string>;
-};
-
-/**
- * Map of custom menu items.
- */
-type CustomMenuItemsMap = Record<string, {
-    url: string;
-    type: string;
-    position: number;
-    labels: {
-        [lang: string]: {
-            label: string;
-            icon: string;
-        };
-    };
-}>;
-
 export type CoreMainMenuHandlerBadgeUpdatedEventData = {
     handler: string; // Handler name.
     value: number; // New counter value.
+};
+
+/**
+ * Override for a main menu item.
+ */
+export type CoreMainMenuOverrideItem = {
+    handler: string; // Handler name.
+    icon?: string; // New icon name.
+    priority?: number; // New priority.
 };

@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export const ADDON_MOD_QUIZ_COMPONENT = 'mmaModQuiz';
+import { CORE_COURSE_MODULE_FEATURE_PREFIX } from '@features/course/constants';
+import { CoreTimeConstants } from '@/core/constants';
 
+export const ADDON_MOD_QUIZ_COMPONENT = 'AddonModQuiz';
+export const ADDON_MOD_QUIZ_COMPONENT_LEGACY = 'mmaModQuiz';
 export const ADDON_MOD_QUIZ_PAGE_NAME = 'mod_quiz';
+export const ADDON_MOD_QUIZ_MODNAME = 'quiz';
 
-export const ADDON_MOD_QUIZ_FEATURE_NAME = 'CoreCourseModuleDelegate_AddonModQuiz';
+export const ADDON_MOD_QUIZ_FEATURE_NAME = CORE_COURSE_MODULE_FEATURE_PREFIX + ADDON_MOD_QUIZ_COMPONENT;
 
+// Events.
 export const ADDON_MOD_QUIZ_ATTEMPT_FINISHED_EVENT = 'addon_mod_quiz_attempt_finished';
-
 export const ADDON_MOD_QUIZ_AUTO_SYNCED = 'addon_mod_quiz_autom_synced';
 
-export const ADDON_MOD_QUIZ_SHOW_TIME_BEFORE_DEADLINE = 3600;
+export const ADDON_MOD_QUIZ_SHOW_TIME_BEFORE_DEADLINE = CoreTimeConstants.SECONDS_HOUR;
 export const ADDON_MOD_QUIZ_IMMEDIATELY_AFTER_PERIOD = 120; // Time considered 'immedately after the attempt', in seconds.
 
 /**
@@ -39,8 +43,10 @@ export const enum AddonModQuizGradeMethods {
  * Possible states for an attempt.
  */
 export const enum AddonModQuizAttemptStates {
+    NOT_STARTED = 'notstarted', // Attempt has been pre-created.
     IN_PROGRESS = 'inprogress',
     OVERDUE = 'overdue',
+    SUBMITTED = 'submitted', // Attempt submitted but not yet graded.
     FINISHED = 'finished',
     ABANDONED = 'abandoned',
 }
@@ -53,4 +59,12 @@ export const enum AddonModQuizDisplayOptionsAttemptStates {
     IMMEDIATELY_AFTER = 0x01000,
     LATER_WHILE_OPEN = 0x00100,
     AFTER_CLOSE = 0x00010,
+}
+
+/**
+ * Possible navigation methods for a quiz.
+ */
+export const enum AddonModQuizNavMethods {
+    FREE = 'free',
+    SEQ = 'sequential',
 }

@@ -13,12 +13,12 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { CoreSites } from '@services/sites';
-import { CoreUrl } from '@singletons/url';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUrl } from '@static/url';
 import { makeSingleton } from '@singletons';
-import { CoreText } from '@singletons/text';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreNavigator } from '@services/navigator';
 
 /**
  * Interface that all handlers must implement.
@@ -96,7 +96,7 @@ export interface CoreContentLinksHandler {
 /**
  * Action to perform when a link is clicked.
  */
-export interface CoreContentLinksAction {
+export type CoreContentLinksAction = {
     /**
      * A message to identify the action. Default: 'core.view'.
      */
@@ -118,12 +118,12 @@ export interface CoreContentLinksAction {
      * @param siteId The site ID.
      */
     action(siteId: string): Promise<void>;
-}
+};
 
 /**
  * Actions and priority for a handler and URL.
  */
-export interface CoreContentLinksHandlerActions {
+export type CoreContentLinksHandlerActions = {
     /**
      * Handler's priority.
      */
@@ -133,7 +133,7 @@ export interface CoreContentLinksHandlerActions {
      * List of actions.
      */
     actions: CoreContentLinksAction[];
-}
+};
 
 /**
  * Delegate to register handlers to handle links.
@@ -163,7 +163,7 @@ export class CoreContentLinksDelegateService {
         }
 
         // Get the list of sites the URL belongs to.
-        const siteIds = await CoreSites.getSiteIdsFromUrl(url, true, username);
+        const siteIds = await CoreSites.getSiteIdsFromUrl(url, { prioritize: true, username });
         if (!siteIds.length) {
             // No sites, no actions.
             return [];
@@ -174,7 +174,7 @@ export class CoreContentLinksDelegateService {
         const linkActions: CoreContentLinksHandlerActions[] = [];
         const promises: Promise<void>[] = [];
         const params = CoreUrl.extractUrlParams(url);
-        const relativeUrl = CoreText.addStartingSlash(CoreUrl.toRelativeURL(site.getURL(), url));
+        const relativeUrl = await site.getRelativeUrl(url);
 
         for (const name in this.handlers) {
             const handler = this.handlers[name];
@@ -187,13 +187,13 @@ export class CoreContentLinksDelegateService {
             }
 
             // Filter the site IDs using the isEnabled function.
-            promises.push(CoreUtils.filterEnabledSites(siteIds, isEnabledFn, checkAll).then(async (siteIds) => {
+            promises.push(CoreSites.filterEnabledSites(siteIds, isEnabledFn, checkAll).then(async (siteIds) => {
                 if (!siteIds.length) {
                     // No sites supported, no actions.
                     return;
                 }
 
-                const actions = await CoreUtils.ignoreErrors(
+                const actions = await CorePromiseUtils.ignoreErrors(
                     Promise.resolve(handler.getActions(siteIds, relativeUrl, params, courseId, data)),
                     <CoreContentLinksAction[]> [],
                 );
@@ -208,24 +208,24 @@ export class CoreContentLinksDelegateService {
                         // Wrap the action function in our own function to treat logged out sites.
                         const actionFunction = action.action;
                         action.action = async (siteId) => {
-                            const site = await CoreSites.getSite(siteId);
+                            if (!CoreSites.isLoggedIn()) {
+                                // Not logged in, load site first.
+                                const loggedIn = await CoreSites.loadSite(siteId, { urlToOpen: url });
+                                if (loggedIn) {
+                                    await CoreNavigator.navigateToSiteHome({ params: { urlToOpen: url } });
+                                }
 
-                            if (!site.isLoggedOut()) {
-                                // Call the action now.
-                                return actionFunction(siteId);
+                                return;
                             }
 
-                            // Site is logged out, authenticate first before treating the URL.
-                            const willReload = await CoreSites.logoutForRedirect(siteId, {
-                                urlToOpen: url,
-                            });
+                            if (siteId !== CoreSites.getCurrentSiteId()) {
+                                // Different site, logout and login first before treating the URL because token could be expired.
+                                await CoreSites.logout({ urlToOpen: url, siteId });
 
-                            if (!willReload) {
-                                // Load the site with the redirect data.
-                                await CoreSites.loadSite(siteId, {
-                                    urlToOpen: url,
-                                });
+                                return;
                             }
+
+                            actionFunction(siteId);
                         };
                     });
 
@@ -240,7 +240,7 @@ export class CoreContentLinksDelegateService {
             }));
         }
         try {
-            await CoreUtils.allPromises(promises);
+            await CorePromiseUtils.allPromises(promises);
         } catch {
             // Ignore errors.
         }

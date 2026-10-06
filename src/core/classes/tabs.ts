@@ -23,23 +23,25 @@ import {
     ViewChild,
     SimpleChange,
     ElementRef,
+    inject,
 } from '@angular/core';
 import { BackButtonEvent } from '@ionic/core';
 import { Subscription } from 'rxjs';
 
 import { CoreSettingsHelper } from '@features/settings/services/settings-helper';
 import { CoreAriaRoleTab, CoreAriaRoleTabFindable } from './aria-role-tab';
-import { CoreEventObserver } from '@singletons/events';
-import { CoreDom } from '@singletons/dom';
-import { CoreWait } from '@singletons/wait';
+import { CoreEventObserver } from '@static/events';
+import { CoreDom } from '@static/dom';
+import { CoreWait } from '@static/wait';
 import { CoreError } from './errors/error';
 import { CorePromisedValue } from './promised-value';
-import { AsyncDirective } from './async-directive';
-import { CoreDirectivesRegistry } from '@singletons/directives-registry';
+import type { AsyncDirective } from '../types/async-directive';
+import { CoreDirectivesRegistry } from '@static/directives-registry';
 import { Swiper } from 'swiper';
 import { SwiperOptions } from 'swiper/types';
-import { CoreSwiper } from '@singletons/swiper';
+import { CoreSwiper } from '@static/swiper';
 import { toBoolean } from '../transforms/boolean';
+import { BackButtonPriority } from '../constants';
 
 /**
  * Class to abstract some common code for tabs.
@@ -104,18 +106,20 @@ export class CoreTabsBaseComponent<T extends CoreTabBase> implements AfterViewIn
     protected firstSelectedTab?: string; // ID of the first selected tab to control history.
     protected backButtonFunction: (event: BackButtonEvent) => void;
     // Swiper documentation: https://swiperjs.com/swiper-api
-    protected isInTransition = false; // Wether Slides is in transition.
+    protected isInTransition = false; // Whether Slides is in transition.
     protected subscriptions: Subscription[] = [];
     protected onReadyPromise = new CorePromisedValue<void>();
 
     tabAction: CoreTabsRoleTab<T>;
 
-    constructor(element: ElementRef) {
+    constructor() {
+        const element: HTMLElement = inject(ElementRef).nativeElement;
+
         this.backButtonFunction = (event) => this.backButtonClicked(event);
 
         this.tabAction = new CoreTabsRoleTab(this);
 
-        CoreDirectivesRegistry.register(element.nativeElement, this);
+        CoreDirectivesRegistry.register(element, this);
     }
 
     /**
@@ -158,7 +162,7 @@ export class CoreTabsBaseComponent<T extends CoreTabBase> implements AfterViewIn
      * @param event Event.
      */
     protected backButtonClicked(event: BackButtonEvent): void {
-        event.detail.register(40, (processNextHandler: () => void) => {
+        event.detail.register(BackButtonPriority.CORE_TABS, (processNextHandler: () => void) => {
             if (this.selectHistory.length > 1) {
                 // The previous page in history is not the last one, we need the previous one.
                 const previousTabId = this.selectHistory[this.selectHistory.length - 2];
@@ -277,15 +281,17 @@ export class CoreTabsBaseComponent<T extends CoreTabBase> implements AfterViewIn
         }
 
         try {
-            const selectedTab = this.calculateInitialTab();
-            if (!selectedTab) {
-                // No enabled tabs, return.
-                throw new CoreError('No enabled tabs.');
-            }
+            if (!this.firstSelectedTab) {
+                const selectedTab = this.calculateInitialTab();
+                if (!selectedTab) {
+                    // No enabled tabs, return.
+                    throw new CoreError('No enabled tabs.');
+                }
 
-            this.firstSelectedTab = selectedTab.id;
-            if (this.firstSelectedTab !== undefined) {
-                this.selectTab(this.firstSelectedTab);
+                this.firstSelectedTab = selectedTab.id;
+                if (this.firstSelectedTab !== undefined) {
+                    this.selectTab(this.firstSelectedTab);
+                }
             }
 
             // Check which arrows should be shown.
@@ -470,9 +476,9 @@ export class CoreTabsBaseComponent<T extends CoreTabBase> implements AfterViewIn
             return;
         }
 
-        const suceeded = await this.loadTab(tabToSelect);
+        const succeeded = await this.loadTab(tabToSelect);
 
-        if (suceeded !== false) {
+        if (succeeded !== false) {
             this.tabSelected(tabToSelect, index);
         }
         this.onReadyPromise.resolve();
@@ -488,6 +494,7 @@ export class CoreTabsBaseComponent<T extends CoreTabBase> implements AfterViewIn
         this.selectHistory.push(tab.id ?? '');
         this.selected = tab.id;
         this.selectedIndex = tabIndex;
+        this.swiper?.slideTo(this.selectedIndex, 0);
 
         this.ionChange.emit(tab);
     }

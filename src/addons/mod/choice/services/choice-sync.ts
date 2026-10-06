@@ -20,13 +20,26 @@ import { CoreCourse } from '@features/course/services/course';
 import { CoreCourseLogHelper } from '@features/course/services/log-helper';
 import { CoreNetwork } from '@services/network';
 import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreWSError } from '@classes/errors/wserror';
 import { makeSingleton } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import { AddonModChoice } from './choice';
 import { AddonModChoiceOffline } from './choice-offline';
-import { AddonModChoicePrefetchHandler } from './handlers/prefetch';
-import { ADDON_MOD_CHOICE_AUTO_SYNCED, ADDON_MOD_CHOICE_COMPONENT } from '../constants';
+import { ADDON_MOD_CHOICE_AUTO_SYNCED, ADDON_MOD_CHOICE_COMPONENT_LEGACY, ADDON_MOD_CHOICE_MODNAME } from '../constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+
+declare module '@static/events' {
+
+    /**
+     * Augment CoreEventsData interface with events specific to this service.
+     *
+     * @see https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation
+     */
+    export interface CoreEventsData {
+        [ADDON_MOD_CHOICE_AUTO_SYNCED]: AddonModChoiceAutoSyncData;
+    }
+
+}
 
 /**
  * Service to sync choices.
@@ -48,14 +61,14 @@ export class AddonModChoiceSyncProvider extends CoreCourseActivitySyncBaseProvid
      * @returns Sync ID.
      */
     protected getSyncId(choiceId: number, userId: number): string {
-        return choiceId + '#' + userId;
+        return `${choiceId}#${userId}`;
     }
 
     /**
      * Try to synchronize all the choices in a certain site or in all sites.
      *
      * @param siteId Site ID to sync. If not defined, sync all sites.
-     * @param force Wether to force sync not depending on last execution.
+     * @param force Whether to force sync not depending on last execution.
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
     syncAllChoices(siteId?: string, force?: boolean): Promise<void> {
@@ -65,7 +78,7 @@ export class AddonModChoiceSyncProvider extends CoreCourseActivitySyncBaseProvid
     /**
      * Sync all pending choices on a site.
      *
-     * @param force Wether to force sync not depending on last execution.
+     * @param force Whether to force sync not depending on last execution.
      * @param siteId Site ID to sync.
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
@@ -149,9 +162,9 @@ export class AddonModChoiceSyncProvider extends CoreCourseActivitySyncBaseProvid
         };
 
         // Sync offline logs.
-        await CoreUtils.ignoreErrors(CoreCourseLogHelper.syncActivity(ADDON_MOD_CHOICE_COMPONENT, choiceId, siteId));
+        await CorePromiseUtils.ignoreErrors(CoreCourseLogHelper.syncActivity(ADDON_MOD_CHOICE_COMPONENT_LEGACY, choiceId, siteId));
 
-        const data = await CoreUtils.ignoreErrors(AddonModChoiceOffline.getResponse(choiceId, siteId, userId));
+        const data = await CorePromiseUtils.ignoreErrors(AddonModChoiceOffline.getResponse(choiceId, siteId, userId));
 
         if (!data || !data.choiceid) {
             // Nothing to sync. Set sync time.
@@ -181,7 +194,7 @@ export class AddonModChoiceSyncProvider extends CoreCourseActivitySyncBaseProvid
 
             await AddonModChoiceOffline.deleteResponse(choiceId, siteId, userId);
         } catch (error) {
-            if (!CoreUtils.isWebServiceError(error)) {
+            if (!CoreWSError.isWebServiceError(error)) {
                 // Couldn't connect to server, reject.
                 throw error;
             }
@@ -197,9 +210,9 @@ export class AddonModChoiceSyncProvider extends CoreCourseActivitySyncBaseProvid
 
         // Data has been sent to server, prefetch choice if needed.
         try {
-            const module = await CoreCourse.getModuleBasicInfoByInstance(choiceId, 'choice', { siteId });
+            const module = await CoreCourse.getModuleBasicInfoByInstance(choiceId, ADDON_MOD_CHOICE_MODNAME, { siteId });
 
-            await this.prefetchAfterUpdate(AddonModChoicePrefetchHandler.instance, module, courseId, undefined, siteId);
+            await this.prefetchModuleAfterUpdate(module, courseId, undefined, siteId);
         } catch {
             // Ignore errors.
         }
@@ -220,7 +233,7 @@ export const AddonModChoiceSync = makeSingleton(AddonModChoiceSyncProvider);
 export type AddonModChoiceSyncResult = CoreSyncResult;
 
 /**
- * Data passed to AUTO_SYNCED event.
+ * Data passed to ADDON_MOD_CHOICE_AUTO_SYNCED event.
  */
 export type AddonModChoiceAutoSyncData = {
     choiceId: number;

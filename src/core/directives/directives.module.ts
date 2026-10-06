@@ -22,7 +22,7 @@ import { CoreFaIconDirective } from './fa-icon';
 import { CoreFormatTextDirective } from './format-text';
 import { CoreLinkDirective } from './link';
 import { CoreLongPressDirective } from './long-press';
-import { CoreSupressEventsDirective } from './supress-events';
+import { CoreSuppressEventsDirective } from './supress-events';
 import { CoreUserLinkDirective } from './user-link';
 import { CoreAriaButtonClickDirective } from './aria-button';
 import { CoreOnResizeDirective } from './on-resize';
@@ -33,11 +33,11 @@ import { CoreCollapsibleItemDirective } from './collapsible-item';
 import { CoreCollapsibleFooterDirective } from './collapsible-footer';
 import { CoreContentDirective } from './content';
 import { CoreUpdateNonReactiveAttributesDirective } from './update-non-reactive-attributes';
-import { CoreUserTourDirective } from './user-tour';
 import { CoreIonDatetimeDirective } from './datetime';
+import { CoreReadingModeDirective } from './reading-mode';
 
 @NgModule({
-    declarations: [
+    imports: [
         CoreAutoFocusDirective,
         CoreAutoRowsDirective,
         CoreExternalContentDirective,
@@ -46,7 +46,7 @@ import { CoreIonDatetimeDirective } from './datetime';
         CoreFormatTextDirective,
         CoreLinkDirective,
         CoreLongPressDirective,
-        CoreSupressEventsDirective,
+        CoreSuppressEventsDirective,
         CoreUserLinkDirective,
         CoreAriaButtonClickDirective,
         CoreOnResizeDirective,
@@ -57,8 +57,8 @@ import { CoreIonDatetimeDirective } from './datetime';
         CoreCollapsibleFooterDirective,
         CoreContentDirective,
         CoreUpdateNonReactiveAttributesDirective,
-        CoreUserTourDirective,
         CoreIonDatetimeDirective,
+        CoreReadingModeDirective,
     ],
     exports: [
         CoreAutoFocusDirective,
@@ -69,7 +69,7 @@ import { CoreIonDatetimeDirective } from './datetime';
         CoreFormatTextDirective,
         CoreLinkDirective,
         CoreLongPressDirective,
-        CoreSupressEventsDirective,
+        CoreSuppressEventsDirective,
         CoreUserLinkDirective,
         CoreAriaButtonClickDirective,
         CoreOnResizeDirective,
@@ -80,8 +80,8 @@ import { CoreIonDatetimeDirective } from './datetime';
         CoreCollapsibleFooterDirective,
         CoreContentDirective,
         CoreUpdateNonReactiveAttributesDirective,
-        CoreUserTourDirective,
         CoreIonDatetimeDirective,
+        CoreReadingModeDirective,
     ],
 })
 export class CoreDirectivesModule {}

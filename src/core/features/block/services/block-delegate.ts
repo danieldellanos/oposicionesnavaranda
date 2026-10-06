@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Injectable, Type } from '@angular/core';
+import { Injectable, Type, inject } from '@angular/core';
 import { CoreSites } from '@services/sites';
 import { CoreDelegate, CoreDelegateHandler } from '@classes/delegate';
 import { CoreSite } from '@classes/sites/site';
@@ -22,8 +22,9 @@ import { Params } from '@angular/router';
 import { makeSingleton } from '@singletons';
 import { CoreBlockDefaultHandler } from './handlers/default-block';
 import { CoreNavigationOptions } from '@services/navigator';
-import type { ICoreBlockComponent } from '@features/block/classes/base-block-component';
+import type { ReloadableComponent } from '@coretypes/reloadable-component';
 import { ContextLevel } from '@/core/constants';
+import { CORE_BLOCKS_DASHBOARD_FALLBACK_MYOVERVIEW_BLOCK } from '../constants';
 
 /**
  * Interface that all blocks must implement.
@@ -52,7 +53,7 @@ export interface CoreBlockHandler extends CoreDelegateHandler {
 /**
  * Data needed to render a block. It's returned by the handler.
  */
-export interface CoreBlockHandlerData {
+export type CoreBlockHandlerData = {
     /**
      * Title to display for the block.
      */
@@ -67,7 +68,7 @@ export interface CoreBlockHandlerData {
      * The component to render the contents of the block.
      * It's recommended to return the class of the component, but you can also return an instance of the component.
      */
-    component: Type<ICoreBlockComponent>;
+    component: Type<ReloadableComponent>;
 
     /**
      * Data to pass to the component. All the properties in this object will be passed to the component as inputs.
@@ -88,7 +89,7 @@ export interface CoreBlockHandlerData {
      * Navigation options.
      */
     navOptions?: CoreNavigationOptions;
-}
+};
 
 /**
  * Delegate to register block handlers.
@@ -96,25 +97,18 @@ export interface CoreBlockHandlerData {
 @Injectable({ providedIn: 'root' })
 export class CoreBlockDelegateService extends CoreDelegate<CoreBlockHandler> {
 
+    blocksUpdateObservable = new Subject<void>();
+
+    protected defaultHandler = inject(CoreBlockDefaultHandler);
     protected handlerNameProperty = 'blockName';
-
     protected featurePrefix = 'CoreBlockDelegate_';
-
-    blocksUpdateObservable: Subject<void>;
-
-    constructor(
-        protected defaultHandler: CoreBlockDefaultHandler,
-    ) {
-        super('CoreBlockDelegate');
-
-        this.blocksUpdateObservable = new Subject<void>();
-    }
 
     /**
      * @inheritdoc
      */
     async isEnabled(): Promise<boolean> {
-        return !this.areBlocksDisabledInSite();
+        // Always return true, to allow displaying my overview even if all blocks are disabled, to avoid having an empty My Courses.
+        return true;
     }
 
     /**
@@ -204,7 +198,7 @@ export class CoreBlockDelegateService extends CoreDelegate<CoreBlockHandler> {
      */
     protected isFeatureDisabled(handler: CoreBlockHandler, site: CoreSite): boolean {
         // Allow displaying my overview even if all blocks are disabled, to avoid having an empty My Courses.
-        return (this.areBlocksDisabledInSite(site) && handler.blockName !== 'myoverview') ||
+        return (this.areBlocksDisabledInSite(site) && handler.blockName !== CORE_BLOCKS_DASHBOARD_FALLBACK_MYOVERVIEW_BLOCK) ||
             super.isFeatureDisabled(handler, site);
     }
 
@@ -212,7 +206,7 @@ export class CoreBlockDelegateService extends CoreDelegate<CoreBlockHandler> {
      * Called when there are new block handlers available. Informs anyone who subscribed to the
      * observable.
      */
-    updateData(): void {
+    protected updateData(): void {
         this.blocksUpdateObservable.next();
     }
 

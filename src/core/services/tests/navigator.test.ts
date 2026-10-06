@@ -38,7 +38,11 @@ describe('CoreNavigator', () => {
         navigator = new CoreNavigatorService();
         navControllerMock = mockSingleton(NavController, ['navigateRoot', 'navigateForward']);
 
-        router = mockSingleton(Router, { url: '/' });
+        router = mockSingleton(
+            Router,
+            { url: '/' },
+            { forceConstructorFallback: true }, // Workaround to override url and routerState.
+        );
 
         mockSingleton(CoreSites, { getCurrentSiteId: () => '42', isLoggedIn: () => true });
         mockSingleton(CoreMainMenu, { isMainMenuTab: path => Promise.resolve(currentMainMenuHandlers.includes(path)) });
@@ -49,6 +53,9 @@ describe('CoreNavigator', () => {
 
         expect(navigator.isCurrent('/main/foo')).toBe(true);
         expect(navigator.isCurrent('/main')).toBe(false);
+        expect(navigator.isCurrent('../../main/foo')).toBe(true);
+        expect(navigator.isCurrent('../foo')).toBe(true);
+        expect(navigator.isCurrent('main/foo')).toBe(false);
     });
 
     it('gets the current main menu tab', () => {

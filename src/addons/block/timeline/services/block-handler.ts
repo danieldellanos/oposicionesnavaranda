@@ -15,11 +15,11 @@
 import { Injectable } from '@angular/core';
 import { CoreSites } from '@services/sites';
 import { CoreBlockHandlerData } from '@features/block/services/block-delegate';
-import { CoreCourses } from '@features/courses/services/courses';
-import { AddonBlockTimelineComponent } from '@addons/block/timeline/components/timeline/timeline';
+import { CoreCoursesMy } from '@features/courses/services/my';
 import { CoreBlockBaseHandler } from '@features/block/classes/base-block-handler';
 import { makeSingleton } from '@singletons';
 import { CoreCoursesDashboard } from '@features/courses/services/dashboard';
+import { ADDON_BLOCK_TIMELINE_BLOCK_NAME } from '../constants';
 
 /**
  * Block handler.
@@ -28,27 +28,24 @@ import { CoreCoursesDashboard } from '@features/courses/services/dashboard';
 export class AddonBlockTimelineHandlerService extends CoreBlockBaseHandler {
 
     name = 'AddonBlockTimeline';
-    blockName = 'timeline';
+    blockName = ADDON_BLOCK_TIMELINE_BLOCK_NAME;
 
     /**
-     * Check if the handler is enabled on a site level.
-     *
-     * @returns Whether or not the handler is enabled on a site level.
+     * @inheritdoc
      */
     async isEnabled(): Promise<boolean> {
         const enabled = !CoreCoursesDashboard.isDisabledInSite();
         const currentSite = CoreSites.getCurrentSite();
 
         return enabled && ((currentSite && currentSite.isVersionGreaterEqualThan('3.6')) ||
-            !CoreCourses.isMyCoursesDisabledInSite());
+            !CoreCoursesMy.isDisabledInSite());
     }
 
     /**
-     * Returns the data needed to render the block.
-     *
-     * @returns Data or promise resolved with the data.
+     * @inheritdoc
      */
-    getDisplayData(): CoreBlockHandlerData {
+    async getDisplayData(): Promise<CoreBlockHandlerData> {
+        const { AddonBlockTimelineComponent } = await import('../components/timeline/timeline');
 
         return {
             title: 'addon.block_timeline.pluginname',

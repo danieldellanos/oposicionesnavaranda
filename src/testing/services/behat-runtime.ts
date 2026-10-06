@@ -15,7 +15,6 @@
 import { TestingBehatDomUtils, TestingBehatDomUtilsService } from './behat-dom';
 import { TestingBehatBlocking } from './behat-blocking';
 import { CoreCustomURLSchemes, CoreCustomURLSchemesProvider } from '@services/urlschemes';
-import { ONBOARDING_DONE } from '@features/login/constants';
 import { CoreConfig } from '@services/config';
 import { EnvironmentConfig } from '@/types/config';
 import { LocalNotifications, makeSingleton, NgZone, ToastController } from '@singletons';
@@ -23,8 +22,8 @@ import { CoreNetwork, CoreNetworkService } from '@services/network';
 import { CorePushNotifications, CorePushNotificationsProvider } from '@features/pushnotifications/services/pushnotifications';
 import { CoreCronDelegate, CoreCronDelegateService } from '@services/cron';
 import { CoreLoadingComponent } from '@components/loading/loading';
-import { CoreDirectivesRegistry } from '@singletons/directives-registry';
-import { CoreDom } from '@singletons/dom';
+import { CoreDirectivesRegistry } from '@static/directives-registry';
+import { CoreDom } from '@static/dom';
 import { Injectable } from '@angular/core';
 import { CoreSites, CoreSitesProvider } from '@services/sites';
 import { CoreNavigator, CoreNavigatorService } from '@services/navigator';
@@ -33,7 +32,11 @@ import { Swiper } from 'swiper';
 import { LocalNotificationsMock } from '@features/emulator/services/local-notifications';
 import { GetClosureArgs } from '@/core/utils/types';
 import { CoreIframeComponent } from '@components/iframe/iframe';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreLang } from '@services/lang';
+import { CoreBrowser } from '@static/browser';
+import { CoreText } from '@static/text';
+import { CoreOpener } from '@static/opener';
 
 /**
  * Behat runtime servive with public API.
@@ -76,7 +79,7 @@ export class TestingBehatRuntimeService {
     }
 
     /**
-     * Init behat functions and set options like skipping onboarding.
+     * Init behat functions and set options like site finder settings.
      *
      * @param options Options to set on the app.
      */
@@ -88,14 +91,8 @@ export class TestingBehatRuntimeService {
         this.initialized = true;
         TestingBehatBlocking.init();
 
-        if (options.skipOnBoarding) {
-            CoreConfig.set(ONBOARDING_DONE, 1);
-        }
-
         if (options.configOverrides) {
-            // Set the cookie so it's maintained between reloads.
-            document.cookie = 'MoodleAppConfig=' + JSON.stringify(options.configOverrides);
-            CoreConfig.patchEnvironment(options.configOverrides, { patchDefault: true });
+            this.patchEnvironment(options.configOverrides, true);
         }
 
         // Spy on window.open.
@@ -108,6 +105,35 @@ export class TestingBehatRuntimeService {
 
         // Reduce iframes timeout to speed up tests.
         CoreIframeComponent.loadingTimeout = 1000;
+    }
+
+    /**
+     * Patch environment variables at runtime for Behat.
+     *
+     * @param overrides Environment variable overrides.
+     * @param patchDefault Whether to patch default values as well.
+     * @returns OK if successful, or ERROR: followed by message.
+     */
+    patchEnvironment(overrides: Partial<EnvironmentConfig>, patchDefault = false): string {
+        try {
+            if (patchDefault) {
+                // Set the cookie so it's maintained between reloads.
+                const cookie = CoreBrowser.getDevelopmentSetting('Config');
+                // Override existing config.
+                if (cookie) {
+                    const currentConfig = CoreText.parseJSON(cookie, {});
+                    overrides = { ...currentConfig, ...overrides };
+                }
+
+                CoreBrowser.setDevelopmentSetting('Config', JSON.stringify(overrides));
+            }
+
+            CoreConfig.patchEnvironment(overrides, { patchDefault });
+
+            return 'OK';
+        } catch (error) {
+            return `ERROR: ${error instanceof Error ? error.message : error}`;
+        }
     }
 
     /**
@@ -136,19 +162,39 @@ export class TestingBehatRuntimeService {
      * Run an operation inside the angular zone and return result.
      *
      * @param operation Operation callback.
+     * @param blocking Whether the operation is blocking or not.
+     * @param locatorToFind If set, when this locator is found the operation is considered finished. This is useful for
+     *                      operations that might expect user input before finishing, like a confirm modal.
      * @returns OK if successful, or ERROR: followed by message.
      */
-    async runInZone(operation: () => unknown, blocking: boolean = false): Promise<string> {
+    async runInZone(
+        operation: () => unknown,
+        blocking = false,
+        locatorToFind?: TestingBehatElementLocator,
+    ): Promise<string> {
         const blockKey = blocking && TestingBehatBlocking.block();
+        let interval: number | undefined;
 
         try {
-            await NgZone.run(operation);
+            await new Promise<void>((resolve, reject) => {
+                Promise.resolve(NgZone.run(operation)).then(resolve).catch(reject);
+
+                if (locatorToFind) {
+                    interval = window.setInterval(() => {
+                        if (TestingBehatDomUtils.findElementBasedOnText(locatorToFind, { onlyClickable: false })) {
+                            clearInterval(interval);
+                            resolve();
+                        }
+                    }, 500);
+                }
+            });
 
             return 'OK';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         } finally {
             blockKey && TestingBehatBlocking.unblock(blockKey);
+            window.clearInterval(interval);
         }
     }
 
@@ -209,7 +255,7 @@ export class TestingBehatRuntimeService {
      * @returns OK if successful, or ERROR: followed by message.
      */
     async pressStandard(button: string): Promise<string> {
-        this.log('Action - Click standard button: ' + button);
+        this.log(`Action - Click standard button: ${button}`);
 
         // @deprecated usage, use goBack instead.
         if (button === 'back') {
@@ -229,16 +275,19 @@ export class TestingBehatRuntimeService {
 
         switch (button) {
             case 'more menu':
-                foundButton = TestingBehatDomUtils.findElementBasedOnText({
-                    text: 'More',
-                    selector: 'ion-tab-button',
-                }, options);
+                foundButton = TestingBehatDomUtils.findElementBasedOnSelector('ion-tab-button#tab-button-more', options);
                 break;
             case 'user menu' :
-                foundButton = TestingBehatDomUtils.findElementBasedOnText({ text: 'User account' }, options);
+                foundButton = TestingBehatDomUtils.findElementBasedOnSelector(
+                    'core-user-menu-button core-user-avatar',
+                    options,
+                );
                 break;
-            case 'page menu':
-                foundButton = TestingBehatDomUtils.findElementBasedOnText({ text: 'Display options' }, options);
+            case 'page context menu':
+                foundButton = TestingBehatDomUtils.findElementBasedOnSelector(
+                    'ion-header core-context-menu ion-button',
+                    options,
+                );
                 break;
             default:
                 return 'ERROR: Unsupported standard button type';
@@ -306,14 +355,10 @@ export class TestingBehatRuntimeService {
     protected async goBack(): Promise<boolean> {
         const options: TestingBehatFindOptions = {
             onlyClickable: true,
-            containerName: '',
+            containerName: 'ion-header',
         };
 
-        const foundButton = TestingBehatDomUtils.findElementBasedOnText({
-            text: 'Back',
-            selector: 'ion-back-button',
-        }, options);
-
+        const foundButton = TestingBehatDomUtils.findElementBasedOnSelector('ion-back-button', options);
         if (!foundButton) {
             return false;
         }
@@ -350,7 +395,7 @@ export class TestingBehatRuntimeService {
         }
 
         if (backdrops.length > 1) {
-            return 'ERROR: Found too many backdrops ('+backdrops.length+')';
+            return `ERROR: Found too many backdrops (${backdrops.length})`;
         }
 
         backdrops[0]?.click();
@@ -385,7 +430,7 @@ export class TestingBehatRuntimeService {
 
             return 'OK';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -413,7 +458,7 @@ export class TestingBehatRuntimeService {
 
             return 'OK';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -498,7 +543,7 @@ export class TestingBehatRuntimeService {
 
             return (isLoading() || isCompleted() || hasMoved()) ? 'OK' : 'ERROR: Couldn\'t load more items.';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -511,6 +556,9 @@ export class TestingBehatRuntimeService {
     isSelected(locator: TestingBehatElementLocator): string {
         this.log('Action - Is Selected', locator);
 
+        locator.selector = locator.selector
+            ?? 'ion-checkbox, ion-radio, ion-toggle, ion-select-option, [aria-current], [aria-selected], [aria-checked]';
+
         try {
             const element = TestingBehatDomUtils.findElementBasedOnText(locator, { onlyClickable: false });
 
@@ -520,7 +568,7 @@ export class TestingBehatRuntimeService {
 
             return TestingBehatDomUtils.isElementSelected(element) ? 'YES' : 'NO';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -555,7 +603,50 @@ export class TestingBehatRuntimeService {
 
             return 'OK';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
+        }
+    }
+
+    /**
+     * Function to select arbitrary item based on its text or Aria label.
+     *
+     * @param locator Element locator.
+     * @param action Whether to select or unselect the item.
+     * @returns OK if successful, or ERROR: followed by message
+     */
+    async select(locator: TestingBehatElementLocator, action: 'select' | 'unselect' = 'select'): Promise<string> {
+        locator.selector = locator.selector
+            ?? 'ion-checkbox, ion-radio, ion-toggle, ion-select-option, [aria-current], [aria-selected], [aria-checked]';
+
+        this.log('Action - Select', locator);
+        const select = action === 'select' ? true : false;
+
+        try {
+            const found = TestingBehatDomUtils.findElementBasedOnText(locator, { onlyClickable: true });
+
+            if (!found) {
+                return 'ERROR: No element matches locator to select.';
+            }
+
+            const isSelected = TestingBehatDomUtils.isElementSelected(found);
+            // Don't do anything if the item is already in the expected state.
+            if (isSelected === select) {
+                return 'OK';
+            }
+
+            await TestingBehatDomUtils.pressElement(found);
+
+            // The element has not changed to the expected state.
+            if (isSelected === select) {
+                return `Item wasn't ${action}ed after pressing it`;
+            }
+
+            // Block Behat for at least 500ms, WS calls or DOM changes might not begin immediately.
+            TestingBehatBlocking.wait(500);
+
+            return 'OK';
+        } catch (error) {
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -589,7 +680,7 @@ export class TestingBehatRuntimeService {
 
             return input.getAttribute('id') ?? '';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -612,7 +703,7 @@ export class TestingBehatRuntimeService {
 
             return 'OK';
         } catch (error) {
-            return 'ERROR: ' + error.message;
+            return `ERROR: ${error.message}`;
         }
     }
 
@@ -657,7 +748,7 @@ export class TestingBehatRuntimeService {
      * @returns OK or ERROR: followed by message
      */
     async setField(field: string, value: string): Promise<string> {
-        this.log('Action - Set field ' + field + ' to: ' + value);
+        this.log(`Action - Set field ${field} to: ${value}`);
 
         const input = TestingBehatDomUtils.findField(field);
 
@@ -700,7 +791,7 @@ export class TestingBehatRuntimeService {
      * @returns OK or ERROR: followed by message
      */
     async fieldMatches(field: string, value: string): Promise<string> {
-        this.log('Action - Field ' + field + ' matches value: ' + value);
+        this.log(`Action - Field ${field} matches value: ${value}`);
 
         const found = TestingBehatDomUtils.findField(field);
 
@@ -730,8 +821,14 @@ export class TestingBehatRuntimeService {
         if (element.tagName === 'ION-DATETIME') {
             const value = 'value' in element ? element.value : element.innerText;
 
-            // Remove seconds from the value to ensure stability on tests. It could be improved using moment parsing if needed.
-            return value.substring(0, value.length - 3);
+            // Remove seconds from the value to ensure stability on tests. It could be improved using DayJS parsing if needed.
+            // Count the number of ":".
+            const colonCount = value.split(':').length;
+            if (colonCount > 2) {
+                return value.substring(0, value.lastIndexOf(':'));
+            }
+
+            return value;
         }
 
         return 'value' in element ? element.value : element.innerText;
@@ -768,6 +865,8 @@ export class TestingBehatRuntimeService {
     /**
      * Logs information from this Behat runtime JavaScript, including the time and the 'BEHAT'
      * keyword so we can easily filter for it if needed.
+     *
+     * @param {...unknown[]} args Arguments to log.
      */
     log(...args: unknown[]): void {
         const now = new Date();
@@ -776,7 +875,7 @@ export class TestingBehatRuntimeService {
                 String(now.getSeconds()).padStart(2, '0') + '.' +
                 String(now.getMilliseconds()).padStart(2, '0');
 
-        console.log('BEHAT: ' + nowFormatted, ...args); // eslint-disable-line no-console
+        console.log(`BEHAT: ${nowFormatted}`, ...args); // eslint-disable-line no-console
     }
 
     /**
@@ -861,7 +960,11 @@ export class TestingBehatRuntimeService {
             const swiperContainer = this.getElement<{ swiper: Swiper }>('swiper-container', locator);
 
             if (swiperContainer) {
-                direction === 'left' ? swiperContainer.swiper.slideNext() : swiperContainer.swiper.slidePrev();
+                if (direction === 'left') {
+                    swiperContainer.swiper.slideNext();
+                } else {
+                    swiperContainer.swiper.slidePrev();
+                }
 
                 return 'OK';
             }
@@ -877,7 +980,31 @@ export class TestingBehatRuntimeService {
             return 'ERROR: Element to swipe not found.';
         }
 
-        direction === 'left' ? ionContent.swipeNavigation.swipeLeft() : ionContent.swipeNavigation.swipeRight();
+        if (direction === 'left') {
+            ionContent.swipeNavigation.swipeLeft();
+        } else {
+            ionContent.swipeNavigation.swipeRight();
+        }
+
+        return 'OK';
+    }
+
+    /**
+     * Change app language.
+     *
+     * @param language Language code to set.
+     * @returns OK if successful.
+     */
+    async changeLanguage(language: string): Promise<string> {
+        this.log(`Action - Change language to: ${language}`);
+        await CoreLang.changeCurrentLanguage(language);
+
+        const sites = await CoreSites.getSitesInstances();
+        await CorePromiseUtils.ignoreErrors(Promise.all(sites.map((site) => site.invalidateWsCache())));
+
+        CoreNavigator.navigate('/reload', {
+            reset: true,
+        });
 
         return 'OK';
     }
@@ -888,7 +1015,15 @@ export class TestingBehatRuntimeService {
      * @returns Promise resolved when toast has been dismissed.
      */
     async waitToastDismiss(): Promise<void> {
-        await CoreUtils.ignoreErrors(ToastController.dismiss());
+        await CorePromiseUtils.ignoreErrors(ToastController.dismiss());
+    }
+
+    /**
+     * Browser tab was closed.
+     */
+    browserTabClosed(): void {
+        // Call the function to close the IAB (if any) to force triggering the exit event.
+        CoreOpener.closeInAppBrowser();
     }
 
 }
@@ -916,6 +1051,5 @@ export type TestingBehatElementLocator = {
 };
 
 export type TestingBehatInitOptions = {
-    skipOnBoarding?: boolean;
     configOverrides?: Partial<EnvironmentConfig>;
 };

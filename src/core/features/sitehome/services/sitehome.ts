@@ -19,10 +19,11 @@ import { CoreSite } from '@classes/sites/site';
 import { makeSingleton } from '@singletons';
 import { CoreCourse } from '../../course/services/course';
 import { CoreCourses } from '../../courses/services/courses';
-import { AddonModForum, AddonModForumData } from '@addons/mod/forum/services/forum';
+import { AddonModForumData } from '@addons/mod/forum/services/forum';
 import { CoreError } from '@classes/errors/error';
 import { CoreBlockHelper } from '@features/block/services/block-helper';
 import { CoreSiteWSPreSets } from '@classes/sites/authenticated-site';
+import { CORE_SITEHOME_MENU_FEATURE_NAME } from '../constants';
 
 /**
  * Items with index 1 and 3 were removed on 2.5 and not being supported in the app.
@@ -53,8 +54,10 @@ export class CoreSiteHomeProvider {
             siteHomeId = CoreSites.getCurrentSiteHomeId();
         }
 
+        const { AddonModForum } = await import('@addons/mod/forum/services/forum');
+
         const forums = await AddonModForum.getCourseForums(siteHomeId);
-        const forum = forums.find((forum) => forum.type == 'news');
+        const forum = forums.find((forum) => forum.type === 'news');
 
         if (forum) {
             return forum;
@@ -67,9 +70,10 @@ export class CoreSiteHomeProvider {
      * Invalidate the WS call to get the news forum for the Site Home.
      *
      * @param siteHomeId Site Home ID.
-     * @returns Promise resolved when invalidated.
      */
     async invalidateNewsForum(siteHomeId: number): Promise<void> {
+        const { AddonModForum } = await import('@addons/mod/forum/services/forum');
+
         await AddonModForum.invalidateForumData(siteHomeId);
     }
 
@@ -83,17 +87,24 @@ export class CoreSiteHomeProvider {
         try {
             const site = await CoreSites.getSite(siteId);
 
-            // First check if it's disabled.
             if (this.isDisabledInSite(site)) {
                 return false;
             }
+
+            // Since 5.2.
+            const enabled = await site.getBooleanConfig('enablemyhome', false, true);
+            if (!enabled) {
+                return false;
+            }
+
+            siteId = siteId || site.getId();
 
             // Use a WS call to check if there's content in the site home.
             const siteHomeId = site.getSiteHomeId();
             const preSets: CoreSiteWSPreSets = { emergencyCache: false };
 
             try {
-                const sections = await CoreCourse.getSections(siteHomeId, false, true, preSets, site.id);
+                const sections = await CoreCourse.getSections(siteHomeId, false, true, preSets, siteId);
 
                 if (!sections || !sections.length) {
                     throw Error('No sections found');
@@ -145,7 +156,7 @@ export class CoreSiteHomeProvider {
     isDisabledInSite(site: CoreSite): boolean {
         site = site || CoreSites.getCurrentSite();
 
-        return site.isFeatureDisabled('CoreMainMenuDelegate_CoreSiteHome');
+        return site.isFeatureDisabled(CORE_SITEHOME_MENU_FEATURE_NAME);
     }
 
     /**
@@ -168,18 +179,20 @@ export class CoreSiteHomeProvider {
 
             let add = false;
             switch (itemNumber) {
-                case FrontPageItemNames['NEWS_ITEMS']:
+                case FrontPageItemNames.NEWS_ITEMS:
                     // Get number of news items to show.
                     add = !!CoreSites.getCurrentSite()?.getStoredConfig('newsitems');
                     break;
-                case FrontPageItemNames['COMBO_LIST']:
-                    itemNumber = FrontPageItemNames['LIST_OF_CATEGORIES']; // Do not break here.
-                case FrontPageItemNames['LIST_OF_CATEGORIES']:
-                case FrontPageItemNames['LIST_OF_COURSE']:
-                case FrontPageItemNames['ENROLLED_COURSES']:
+                case FrontPageItemNames.COMBO_LIST:
+                    itemNumber = FrontPageItemNames.LIST_OF_CATEGORIES;
                     add = true;
                     break;
-                case FrontPageItemNames['COURSE_SEARCH_BOX']:
+                case FrontPageItemNames.LIST_OF_CATEGORIES:
+                case FrontPageItemNames.LIST_OF_COURSE:
+                case FrontPageItemNames.ENROLLED_COURSES:
+                    add = true;
+                    break;
+                case FrontPageItemNames.COURSE_SEARCH_BOX:
                     add = !CoreCourses.isSearchCoursesDisabledInSite();
                     break;
                 default:

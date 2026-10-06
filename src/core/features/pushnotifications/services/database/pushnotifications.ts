@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { SQLiteDB } from '@classes/sqlitedb';
-import { CoreAppSchema } from '@services/app';
+import { CoreAppSchema } from '@services/app-db';
 import { CoreSiteSchema } from '@services/sites';
 
 /**
@@ -128,7 +128,7 @@ export const SITE_SCHEMA: CoreSiteSchema = {
 export type CorePushNotificationsBadgeDBRecord = {
     siteid: string;
     addon: string;
-    number: number; // eslint-disable-line id-blacklist
+    number: number; // eslint-disable-line id-denylist
 };
 
 export type CorePushNotificationsBadgeDBPrimaryKeys = typeof BADGE_TABLE_PRIMARY_KEYS[number];

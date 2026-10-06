@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { CanDeactivateFn } from '@angular/router';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 
 /**
  * Check if a component implements the canLeave interface.
@@ -27,6 +27,7 @@ const isCanLeave = (component: unknown | null): component is CanLeave =>
 /**
  * Guard to check if the user can leave a page.
  *
+ * @param component Component instance to check.
  * @returns True if user has sites, redirect route otherwise.
  */
 export const canLeaveGuard: CanDeactivateFn<unknown> = async (component: unknown) => {
@@ -34,7 +35,7 @@ export const canLeaveGuard: CanDeactivateFn<unknown> = async (component: unknown
         return true;
     }
 
-    return CoreUtils.ignoreErrors(component.canLeave(), false);
+    return CorePromiseUtils.ignoreErrors(component.canLeave(), false);
 };
 
 export interface CanLeave {

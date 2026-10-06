@@ -14,7 +14,7 @@
 
 import { Injectable } from '@angular/core';
 
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { CoreSites, CoreSitesReadingStrategy } from '@services/sites';
 import {
     CoreCourses,
@@ -22,7 +22,7 @@ import {
     CoreCourseSearchedData,
     CoreCourseUserAdminOrNavOptionIndexed,
 } from '@features/courses/services/courses';
-import { CoreCourse, CoreCourseAccessDataType } from '@features/course/services/course';
+import { CoreCourse } from '@features/course/services/course';
 import {
     CoreGrades,
     CoreGradesGradeItem,
@@ -33,21 +33,23 @@ import {
     CoreGradesTableLeaderColumn,
     CoreGradesTableRow,
 } from '@features/grades/services/grades';
-import { CoreText } from '@singletons/text';
-import { CoreUrl } from '@singletons/url';
-import { CoreMenuItem, CoreUtils } from '@services/utils/utils';
-import { CoreDomUtils } from '@services/utils/dom';
+import { CoreText } from '@static/text';
+import { CoreUrl } from '@static/url';
+import { CoreMenuItem, CoreUtils } from '@static/utils';
+import { CoreDom } from '@static/dom';
 import { CoreNavigator } from '@services/navigator';
 import { makeSingleton, Translate } from '@singletons';
 import { CoreError } from '@classes/errors/error';
 import { CoreCourseHelper } from '@features/course/services/course-helper';
 import { CoreCourseModuleDelegate } from '@features/course/services/module-delegate';
 import { CoreCourseAccess } from '@features/course/services/course-options-delegate';
-import { CoreLoadings } from '@services/loadings';
+import { CoreLoadings } from '@services/overlays/loadings';
 import { convertTextToHTMLElement } from '@/core/utils/create-html-element';
-
-export const GRADES_PAGE_NAME = 'grades';
-export const GRADES_PARTICIPANTS_PAGE_NAME = 'participant-grades';
+import { CoreCourseAccessDataType } from '@features/course/constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreArray } from '@static/array';
+import { CoreCourseModuleHelper } from '@features/course/services/course-module-helper';
+import { CORE_GRADES_COURSE_OPTION_NAME, GRADES_PAGE_NAME } from '../constants';
 
 /**
  * Service that provides some features regarding grades information.
@@ -55,11 +57,7 @@ export const GRADES_PARTICIPANTS_PAGE_NAME = 'participant-grades';
 @Injectable({ providedIn: 'root' })
 export class CoreGradesHelperProvider {
 
-    protected logger: CoreLogger;
-
-    constructor() {
-        this.logger = CoreLogger.getInstance('CoreGradesHelperProvider');
-    }
+    protected logger = CoreLogger.getInstance('CoreGradesHelperProvider');
 
     /**
      * Formats a row from the grades table to be rendered in one table.
@@ -134,6 +132,8 @@ export class CoreGradesHelperProvider {
                     row.gradeIconAlt = Translate.instant('core.grades.fail');
                     content = CoreText.cleanTags(content);
                 }
+
+                row.penalty = CoreGradesHelper.getPenaltyFromGrade(content);
             } else {
                 content = CoreText.replaceNewLines(content, '<br>');
             }
@@ -203,7 +203,7 @@ export class CoreGradesHelperProvider {
         // Get a row with some info.
         let normalRow = formatted.rows.find(
             row =>
-                row.itemtype != 'leader' &&
+                row.itemtype !== 'leader' &&
                 (row.grade !== undefined || row.percentage !== undefined),
         );
 
@@ -213,7 +213,7 @@ export class CoreGradesHelperProvider {
         } else if (normalRow && normalRow.percentage !== undefined) {
             columns.percentage = true;
         } else {
-            normalRow = formatted.rows.find((e) => e.itemtype != 'leader');
+            normalRow = formatted.rows.find((e) => e.itemtype !== 'leader');
             columns.grade = true;
         }
 
@@ -221,7 +221,7 @@ export class CoreGradesHelperProvider {
             if (normalRow && normalRow[colName] !== undefined) {
                 formatted.columns.push({
                     name: colName,
-                    colspan: colName == 'gradeitem' ? maxDepth : 1,
+                    colspan: colName === 'gradeitem' ? maxDepth : 1,
                     hiddenPhone: !columns[colName],
                 });
             }
@@ -269,7 +269,7 @@ export class CoreGradesHelperProvider {
 
         try {
             const courses = await CoreCourses.getUserCourses(undefined, undefined, CoreSitesReadingStrategy.ONLY_CACHE);
-            const coursesMap = CoreUtils.arrayToObject(courses, 'id');
+            const coursesMap = CoreArray.toObject(courses, 'id');
 
             coursesWereMissing = this.addCourseData(grades, coursesMap);
         } catch {
@@ -280,7 +280,7 @@ export class CoreGradesHelperProvider {
         if (coursesWereMissing) {
             const courses = await CoreCourses.getCoursesByField('ids', grades.map((grade) => grade.courseid).join(','));
             const coursesMap =
-                CoreUtils.arrayToObject(courses as Record<string, unknown>[], 'id') as
+                CoreArray.toObject(courses as Record<string, unknown>[], 'id') as
                     Record<string, CoreEnrolledCourseData> |
                     Record<string, CoreCourseSearchedData>;
 
@@ -353,7 +353,7 @@ export class CoreGradesHelperProvider {
         userId?: number,
         groupId?: number,
         siteId?: string,
-        ignoreCache: boolean = false,
+        ignoreCache = false,
     ): Promise<CoreGradesFormattedItem[]> {
         const grades = await CoreGrades.getGradeItems(courseId, userId, groupId, siteId, ignoreCache);
 
@@ -386,7 +386,7 @@ export class CoreGradesHelperProvider {
      * @returns URL linking to the module.
      */
     protected getModuleLink(text: string): string | false {
-        const el = CoreDomUtils.toDom(text)[0];
+        const el = CoreDom.toDom(text)[0];
         const link = el.attributes['href'] ? el.attributes['href'].value : false;
 
         if (!link || link.indexOf('/mod/') < 0) {
@@ -429,6 +429,24 @@ export class CoreGradesHelperProvider {
     }
 
     /**
+     * Parse the penalty message from the grade HTML content.
+     *
+     * @param grade Grade to parse.
+     * @returns The penalty message or undefined if not found.
+     */
+    getPenaltyFromGrade(grade?: string): string | undefined {
+        if (!grade) {
+            return undefined;
+        }
+
+        const template = document.createElement('template');
+        template.innerHTML = grade;
+        const icon = template.content.querySelector<HTMLElement>('.penalty-indicator-icon');
+
+        return icon?.title;
+    }
+
+    /**
      * Go to view grades.
      *
      * @param courseId Course ID to view.
@@ -468,7 +486,7 @@ export class CoreGradesHelperProvider {
             // Open the item directly.
             const gradeId = item.id;
 
-            await CoreUtils.ignoreErrors(
+            await CorePromiseUtils.ignoreErrors(
                 CoreNavigator.navigateToSitePath(
                     `/${GRADES_PAGE_NAME}/${courseId}`,
                     { params: { gradeId }, siteId },
@@ -477,23 +495,15 @@ export class CoreGradesHelperProvider {
         } catch {
             try {
                 // Cannot get grade items or there's no need to.
-                if (userId && userId != currentUserId) {
+                if (userId && userId !== currentUserId) {
                     // View another user grades. Open the grades page directly.
-                    await CoreUtils.ignoreErrors(
+                    await CorePromiseUtils.ignoreErrors(
                         CoreNavigator.navigateToSitePath(`/${GRADES_PAGE_NAME}/${courseId}`, { siteId }),
                     );
                 }
 
-                // View own grades. Check if we already are in the course index page.
-                if (CoreCourse.currentViewIsCourse(courseId)) {
-                    // Current view is this course, just select the grades tab.
-                    CoreCourse.selectCourseTab('CoreGrades');
-
-                    return;
-                }
-
                 // Open the course with the grades tab selected.
-                await CoreCourseHelper.getAndOpenCourse(courseId, { selectedTab: 'CoreGrades' }, siteId);
+                await CoreCourseHelper.getAndOpenCourse(courseId, { selectedTab: CORE_GRADES_COURSE_OPTION_NAME }, siteId);
             } catch {
                 // Cannot get course for some reason, just open the grades page.
                 await CoreNavigator.navigateToSitePath(`/${GRADES_PAGE_NAME}/${courseId}`, { siteId });
@@ -587,7 +597,7 @@ export class CoreGradesHelperProvider {
 
                 row.itemtype = 'mod';
                 row.itemmodule = modname;
-                row.iconAlt = CoreCourse.translateModuleName(row.itemmodule) || '';
+                row.iconAlt = CoreCourseModuleHelper.translateModuleName(row.itemmodule) || '';
                 row.image = await CoreCourseModuleDelegate.getModuleIconSrc(modname, modicon);
             }
         } else {
@@ -626,7 +636,7 @@ export class CoreGradesHelperProvider {
     async makeGradesMenu(
         gradingType?: number,
         moduleId?: number,
-        defaultLabel: string = '',
+        defaultLabel = '',
         defaultValue: string | number = '',
         scale?: string,
     ): Promise<CoreGradesMenuItem[]> {
@@ -662,7 +672,7 @@ export class CoreGradesHelperProvider {
 
             for (let i = gradingType; i >= 0; i--) {
                 grades.push({
-                    label: i + ' / ' + gradingType,
+                    label: `${i} / ${gradingType}`,
                     value: i,
                 });
             }
@@ -760,6 +770,7 @@ export type CoreGradesFormattedTableRow = CoreGradesFormattedRowCommonData & {
     gradeClass?: string;
     gradeIcon?: string;
     gradeIconAlt?: string;
+    penalty?: string;
 };
 
 export type CoreGradesFormattedTableColumn = {

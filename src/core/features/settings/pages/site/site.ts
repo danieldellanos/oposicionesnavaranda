@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { AfterViewInit, Component, OnDestroy, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, OnDestroy, viewChild } from '@angular/core';
 
-import { CoreSettingsHandlerToDisplay, CoreSettingsPageHandlerToDisplay } from '../../services/settings-delegate';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { CoreSettingsHandlerToDisplay } from '../../services/settings-delegate';
+import { CoreEventObserver, CoreEvents } from '@static/events';
 import { CoreSites } from '@services/sites';
 import { CoreNavigator } from '@services/navigator';
 import { CoreSplitViewComponent } from '@components/split-view/split-view';
 import { CoreListItemsManager } from '@classes/items-management/list-items-manager';
 import { CoreRoutedItemsManagerSourcesTracker } from '@classes/items-management/routed-items-manager-sources-tracker';
 import { CoreSettingsHelper } from '@features/settings/services/settings-helper';
-import { CoreDomUtils } from '@services/utils/dom';
 import { CoreNetwork } from '@services/network';
-import { Subscription } from 'rxjs';
-import { NgZone } from '@singletons';
-import { CoreConstants } from '@/core/constants';
+import { Translate } from '@singletons';
+import { CoreConfigSettingKey } from '@/core/constants';
 import { CoreConfig } from '@services/config';
 import { CoreSettingsHandlersSource } from '@features/settings/classes/settings-handlers-source';
-import { CoreToasts } from '@services/toasts';
+import { CoreToasts } from '@services/overlays/toasts';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Page that displays the list of site settings pages.
@@ -37,20 +37,22 @@ import { CoreToasts } from '@services/toasts';
 @Component({
     selector: 'page-core-site-preferences',
     templateUrl: 'site.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class CoreSitePreferencesPage implements AfterViewInit, OnDestroy {
+export default class CoreSitePreferencesPage implements AfterViewInit, OnDestroy {
 
-    @ViewChild(CoreSplitViewComponent) splitView!: CoreSplitViewComponent;
+    readonly splitView = viewChild.required(CoreSplitViewComponent);
 
-    handlers: CoreListItemsManager<CoreSettingsPageHandlerToDisplay, CoreSettingsHandlersSource>;
+    handlers: CoreListItemsManager<CoreSettingsHandlerToDisplay, CoreSettingsHandlersSource>;
 
     dataSaver = false;
-    limitedConnection = false;
-    isOnline = true;
+    readonly limitedConnection = CoreNetwork.isCellularSignal;
+    readonly isOnline = CoreNetwork.onlineSignal;
 
     protected siteId: string;
     protected sitesObserver: CoreEventObserver;
-    protected networkObserver: Subscription;
     protected isDestroyed = false;
 
     get handlerItems(): CoreSettingsHandlerToDisplay[] {
@@ -67,38 +69,28 @@ export class CoreSitePreferencesPage implements AfterViewInit, OnDestroy {
         this.sitesObserver = CoreEvents.on(CoreEvents.SITE_UPDATED, () => {
             this.refreshData();
         }, this.siteId);
-
-        this.isOnline = CoreNetwork.isOnline();
-        this.limitedConnection = this.isOnline && CoreNetwork.isNetworkAccessLimited();
-
-        this.networkObserver = CoreNetwork.onChange().subscribe(() => {
-            // Execute the callback in the Angular zone, so change detection doesn't stop working.
-            NgZone.run(() => {
-                this.isOnline = CoreNetwork.isOnline();
-                this.limitedConnection = this.isOnline && CoreNetwork.isNetworkAccessLimited();
-            });
-        });
     }
 
     /**
      * @inheritdoc
      */
     async ngAfterViewInit(): Promise<void> {
-        this.dataSaver = await CoreConfig.get(CoreConstants.SETTINGS_SYNC_ONLY_ON_WIFI, true);
+        this.dataSaver = await CoreConfig.get(CoreConfigSettingKey.SYNC_ONLY_ON_WIFI, true);
 
         const pageToOpen = CoreNavigator.getRouteParam('page');
 
         try {
             await this.fetchData();
         } finally {
-            const handler = pageToOpen ? this.handlers.items.find(handler => handler.page == pageToOpen) : undefined;
+            const handler = pageToOpen ? this.handlers.items.find(handler =>
+                ('page' in handler) && handler.page === pageToOpen) : undefined;
 
             if (handler) {
-                this.handlers.watchSplitViewOutlet(this.splitView);
+                this.handlers.watchSplitViewOutlet(this.splitView());
 
                 await this.handlers.select(handler);
             } else {
-                await this.handlers.start(this.splitView);
+                await this.handlers.start(this.splitView());
             }
         }
     }
@@ -126,7 +118,7 @@ export class CoreSitePreferencesPage implements AfterViewInit, OnDestroy {
             if (this.isDestroyed) {
                 return;
             }
-            CoreDomUtils.showErrorModalDefault(error, 'core.settings.sitesyncfailed', true);
+            CoreAlerts.showError(error, { default: Translate.instant('core.settings.sitesyncfailed') });
         }
 
     }
@@ -153,12 +145,24 @@ export class CoreSitePreferencesPage implements AfterViewInit, OnDestroy {
     }
 
     /**
+     * Handle click on a handler. Only for non toggle handlers.
+     *
+     * @param handler Handler clicked.
+     */
+    handlerAction(handler: CoreSettingsHandlerToDisplay): void {
+        if ('action' in handler && handler.action) {
+            handler.action();
+        } else if ('page' in handler && handler.page) {
+            this.handlers.select(handler);
+        }
+    }
+
+    /**
      * @inheritdoc
      */
     ngOnDestroy(): void {
         this.isDestroyed = true;
         this.sitesObserver.off();
-        this.networkObserver.unsubscribe();
         this.handlers.destroy();
     }
 

@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnDestroy, ViewChild, ElementRef, OnInit, Optional } from '@angular/core';
+import { Component, OnDestroy, ElementRef, OnInit, inject, viewChild } from '@angular/core';
 import { FileEntry } from '@awesome-cordova-plugins/file/ngx';
 import { FormControl } from '@angular/forms';
-import { CoreEvents, CoreEventObserver } from '@singletons/events';
+import { CoreEvents, CoreEventObserver } from '@static/events';
 import { CoreGroup, CoreGroups, CoreGroupsProvider } from '@services/groups';
 import { CoreNavigator } from '@services/navigator';
 import {
@@ -27,32 +27,35 @@ import {
 import { CoreEditorRichTextEditorComponent } from '@features/editor/components/rich-text-editor/rich-text-editor';
 import { AddonModForumSync } from '@addons/mod/forum/services/forum-sync';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
 import { Translate } from '@singletons';
 import { CoreSync } from '@services/sync';
 import { AddonModForumDiscussionOptions, AddonModForumOffline } from '@addons/mod/forum/services/forum-offline';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUtils } from '@static/utils';
 import { AddonModForumHelper } from '@addons/mod/forum/services/forum-helper';
 import { CoreFileUploader } from '@features/fileuploader/services/fileuploader';
-import { CoreText } from '@singletons/text';
+import { CoreText } from '@static/text';
 import { CanLeave } from '@guards/can-leave';
 import { CoreSplitViewComponent } from '@components/split-view/split-view';
-import { CoreForms } from '@singletons/form';
+import { CoreForms } from '@static/form';
 import { AddonModForumDiscussionsSwipeManager } from '../../classes/forum-discussions-swipe-manager';
 import { ActivatedRoute, ActivatedRouteSnapshot } from '@angular/router';
 import { AddonModForumDiscussionsSource } from '../../classes/forum-discussions-source';
 import { CoreRoutedItemsManagerSourcesTracker } from '@classes/items-management/routed-items-manager-sources-tracker';
-import { CoreTime } from '@singletons/time';
+import { CoreTime } from '@static/time';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
 import {
     ADDON_MOD_FORUM_ALL_GROUPS,
     ADDON_MOD_FORUM_ALL_PARTICIPANTS,
     ADDON_MOD_FORUM_AUTO_SYNCED,
     ADDON_MOD_FORUM_COMPONENT,
+    ADDON_MOD_FORUM_COMPONENT_LEGACY,
     ADDON_MOD_FORUM_NEW_DISCUSSION_EVENT,
 } from '../../constants';
-import { CoreCourseContentsPage } from '@features/course/pages/contents/contents';
-import { CoreLoadings } from '@services/loadings';
+import CoreCourseContentsPage from '@features/course/pages/contents/contents';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
 
 type NewDiscussionData = {
     subject: string;
@@ -70,14 +73,18 @@ type NewDiscussionData = {
 @Component({
     selector: 'page-addon-mod-forum-new-discussion',
     templateUrl: 'new-discussion.html',
-    styleUrls: ['new-discussion.scss'],
+    styleUrl: 'new-discussion.scss',
+    imports: [
+        CoreSharedModule,
+        CoreEditorRichTextEditorComponent,
+    ],
 })
-export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLeave {
+export default class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLeave {
 
-    @ViewChild('newDiscFormEl') formElement!: ElementRef;
-    @ViewChild(CoreEditorRichTextEditorComponent) messageEditor!: CoreEditorRichTextEditorComponent;
+    readonly formElement = viewChild<ElementRef>('newDiscFormEl');
+    readonly messageEditor = viewChild(CoreEditorRichTextEditorComponent);
 
-    component = ADDON_MOD_FORUM_COMPONENT;
+    component = ADDON_MOD_FORUM_COMPONENT_LEGACY;
     messageControl = new FormControl<string | null>(null);
     groupsLoaded = false;
     showGroups = false;
@@ -115,12 +122,11 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
     protected forceLeave = false;
     protected initialGroupId?: number;
     protected logView: () => void;
+    protected route = inject(ActivatedRoute);
+    protected splitView = inject(CoreSplitViewComponent, { optional: true });
+    protected courseContentsPage = inject(CoreCourseContentsPage, { optional: true });
 
-    constructor(
-        protected route: ActivatedRoute,
-        @Optional() protected splitView: CoreSplitViewComponent,
-        @Optional() protected courseContentsPage?: CoreCourseContentsPage,
-    ) {
+    constructor() {
         this.logView = CoreTime.once(() => {
             CoreAnalytics.logEvent({
                 type: CoreAnalyticsEventType.VIEW_ITEM,
@@ -158,7 +164,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
                 await this.discussions.start();
             }
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
 
             this.goBack();
 
@@ -182,7 +188,10 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
         // Refresh data if this discussion is synchronized automatically.
         this.syncObserver = CoreEvents.on(ADDON_MOD_FORUM_AUTO_SYNCED, data => {
             if (data.forumId == this.forumId && data.userId == CoreSites.getCurrentSiteUserId()) {
-                CoreDomUtils.showAlertTranslated('core.notice', 'core.contenteditingsynced');
+                CoreAlerts.show({
+                    header: Translate.instant('core.notice'),
+                    message: Translate.instant('core.contenteditingsynced'),
+                });
                 this.returnToDiscussions();
             }
         }, CoreSites.getCurrentSiteId());
@@ -200,51 +209,15 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
             const promises: Promise<unknown>[] = [];
 
             if (mode === CoreGroupsProvider.SEPARATEGROUPS || mode === CoreGroupsProvider.VISIBLEGROUPS) {
-                promises.push(
-                    CoreGroups.instance
-                        .getActivityAllowedGroups(this.cmId)
-                        .then((result) => {
-                            let promise;
-                            if (mode === CoreGroupsProvider.VISIBLEGROUPS) {
-                                // We need to check which of the returned groups the user can post to.
-                                promise = this.validateVisibleGroups(result.groups);
-                            } else {
-                                // WS already filters groups, no need to do it ourselves. Add "All participants" if needed.
-                                promise = this.addAllParticipantsOption(result.groups, true);
-                            }
-
-                            // eslint-disable-next-line promise/no-nesting
-                            return promise.then(async (forumGroups) => {
-                                if (forumGroups.length > 0) {
-                                    this.groups = forumGroups;
-                                    this.groupIds = forumGroups.map((group) => group.id).filter((id) => id > 0);
-                                    // Do not override group id.
-                                    this.newDiscussion.groupId = this.newDiscussion.groupId || this.getInitialGroupId();
-                                    this.showGroups = true;
-                                    await this.calculateGroupName();
-                                    if (this.groupIds.length <= 1) {
-                                        this.newDiscussion.postToAllGroups = false;
-                                    }
-
-                                    return;
-                                } else {
-                                    const message = mode === CoreGroupsProvider.SEPARATEGROUPS ?
-                                        'addon.mod_forum.cannotadddiscussionall' : 'addon.mod_forum.cannotadddiscussion';
-
-                                    throw new Error(Translate.instant(message));
-                                }
-                            });
-                        }),
-                );
+                promises.push(this.getAllowedGroups(mode));
             } else {
                 this.showGroups = false;
                 this.newDiscussion.postToAllGroups = false;
 
                 // Use the canAddDiscussion WS to check if the user can add attachments and pin discussions.
                 promises.push(
-                    CoreUtils.ignoreErrors(
-                        AddonModForum.instance
-                            .canAddDiscussionToAll(this.forumId, { cmId: this.cmId })
+                    CorePromiseUtils.ignoreErrors(
+                        AddonModForum.canAddDiscussionToAll(this.forumId, { cmId: this.cmId })
                             .then((response) => {
                                 this.canPin = !!response.canpindiscussions;
                                 this.canCreateAttachments = !!response.cancreateattachment;
@@ -260,8 +233,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
 
             // Get access information.
             promises.push(
-                AddonModForum.instance
-                    .getAccessInformation(this.forumId, { cmId: this.cmId })
+                AddonModForum.getAccessInformation(this.forumId, { cmId: this.cmId })
                     .then((accessInfo) => this.accessInfo = accessInfo),
             );
 
@@ -269,57 +241,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
 
             // If editing a discussion, get offline data.
             if (this.timeCreated && !refresh) {
-                this.syncId = AddonModForumSync.getForumSyncId(this.forumId);
-
-                await AddonModForumSync.waitForSync(this.syncId).then(() => {
-                    // Do not block if the scope is already destroyed.
-                    if (!this.isDestroyed) {
-                        CoreSync.blockOperation(ADDON_MOD_FORUM_COMPONENT, this.syncId);
-                    }
-
-                    return AddonModForumOffline.instance
-                        .getNewDiscussion(this.forumId, this.timeCreated)
-                        .then(async (discussion) => {
-                            this.hasOffline = true;
-                            discussion.options = discussion.options || {};
-                            if (discussion.groupid == ADDON_MOD_FORUM_ALL_GROUPS) {
-                                this.newDiscussion.groupId = this.groups[0].id;
-                                this.newDiscussion.postToAllGroups = true;
-                            } else {
-                                this.newDiscussion.groupId = discussion.groupid;
-                                this.newDiscussion.postToAllGroups = false;
-                            }
-                            this.newDiscussion.subject = discussion.subject;
-                            this.newDiscussion.message = discussion.message;
-                            this.newDiscussion.subscribe = !!discussion.options.discussionsubscribe;
-                            this.newDiscussion.pin = !!discussion.options.discussionpinned;
-                            this.messageControl.setValue(discussion.message);
-                            await this.calculateGroupName();
-
-                            // Treat offline attachments if any.
-                            if (typeof discussion.options.attachmentsid === 'object' && discussion.options.attachmentsid.offline) {
-                                const files = await AddonModForumHelper.getNewDiscussionStoredFiles(
-                                    this.forumId,
-                                    this.timeCreated,
-                                );
-
-                                this.newDiscussion.files = files;
-                            }
-
-                            // Show advanced fields by default if any of them has not the default value.
-                            if (
-                                !this.newDiscussion.subscribe ||
-                                this.newDiscussion.pin ||
-                                this.newDiscussion.files.length ||
-                                this.groups.length > 0 && this.newDiscussion.groupId != this.groups[0].id ||
-                                this.newDiscussion.postToAllGroups
-                            ) {
-                                this.advanced = true;
-                            }
-
-                            return;
-                        });
-                });
+                await this.syncDiscussionData();
             }
 
             if (!this.originalData) {
@@ -335,9 +257,99 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
 
             this.logView();
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.mod_forum.errorgetgroups', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.mod_forum.errorgetgroups') });
 
             this.showForm = false;
+        }
+    }
+
+    /**
+     * Get the groups the user can post to depending on the mode.
+     *
+     * @param mode Group mode.
+     */
+    protected async getAllowedGroups(mode: number): Promise<void> {
+        const result = await CoreGroups.getActivityAllowedGroups(this.cmId);
+        let promise: Promise<CoreGroup[]>;
+        if (mode === CoreGroupsProvider.VISIBLEGROUPS) {
+            // We need to check which of the returned groups the user can post to.
+            promise = this.validateVisibleGroups(result.groups);
+        } else {
+            // WS already filters groups, no need to do it ourselves. Add "All participants" if needed.
+            promise = this.addAllParticipantsOption(result.groups, true);
+        }
+
+        const forumGroups = await promise;
+        if (forumGroups.length > 0) {
+            this.groups = forumGroups;
+            this.groupIds = forumGroups.map((group) => group.id).filter((id) => id > 0);
+            // Do not override group id.
+            this.newDiscussion.groupId = this.newDiscussion.groupId || this.getInitialGroupId();
+            this.showGroups = true;
+            await this.calculateGroupName();
+            if (this.groupIds.length <= 1) {
+                this.newDiscussion.postToAllGroups = false;
+            }
+
+            return;
+        } else {
+            const message = mode === CoreGroupsProvider.SEPARATEGROUPS ?
+                'addon.mod_forum.cannotadddiscussionall' : 'addon.mod_forum.cannotadddiscussion';
+
+            throw new Error(Translate.instant(message));
+        }
+    }
+
+    /**
+     * Convenience function to synchronize the discussion data if it's stored offline.
+     */
+    protected async syncDiscussionData(): Promise<void> {
+        this.syncId = AddonModForumSync.getForumSyncId(this.forumId);
+
+        await AddonModForumSync.waitForSync(this.syncId);
+
+        // Do not block if the scope is already destroyed.
+        if (!this.isDestroyed) {
+            CoreSync.blockOperation(ADDON_MOD_FORUM_COMPONENT, this.syncId);
+        }
+
+        const discussion = await AddonModForumOffline.getNewDiscussion(this.forumId, this.timeCreated);
+
+        this.hasOffline = true;
+        discussion.options = discussion.options || {};
+        if (discussion.groupid === ADDON_MOD_FORUM_ALL_GROUPS) {
+            this.newDiscussion.groupId = this.groups[0].id;
+            this.newDiscussion.postToAllGroups = true;
+        } else {
+            this.newDiscussion.groupId = discussion.groupid;
+            this.newDiscussion.postToAllGroups = false;
+        }
+        this.newDiscussion.subject = discussion.subject;
+        this.newDiscussion.message = discussion.message;
+        this.newDiscussion.subscribe = !!discussion.options.discussionsubscribe;
+        this.newDiscussion.pin = !!discussion.options.discussionpinned;
+        this.messageControl.setValue(discussion.message);
+        await this.calculateGroupName();
+
+        // Treat offline attachments if any.
+        if (typeof discussion.options.attachmentsid === 'object' && discussion.options.attachmentsid.offline) {
+            const files = await AddonModForumHelper.getNewDiscussionStoredFiles(
+                this.forumId,
+                this.timeCreated,
+            );
+
+            this.newDiscussion.files = files;
+        }
+
+        // Show advanced fields by default if any of them has not the default value.
+        if (
+            !this.newDiscussion.subscribe ||
+            this.newDiscussion.pin ||
+            this.newDiscussion.files.length ||
+            this.groups.length > 0 && this.newDiscussion.groupId !== this.groups[0].id ||
+            this.newDiscussion.postToAllGroups
+        ) {
+            this.advanced = true;
         }
     }
 
@@ -353,7 +365,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
         // We first check if the user can post to all the groups.
         try {
             response = await AddonModForum.canAddDiscussionToAll(this.forumId, { cmId: this.cmId });
-        } catch (error) {
+        } catch {
             // The call failed, let's assume he can't.
             response = {
                 status: false,
@@ -376,8 +388,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
 
         forumGroups.forEach((group) => {
             promises.push(
-                AddonModForum.instance
-                    .canAddDiscussion(this.forumId, group.id, { cmId: this.cmId })
+                AddonModForum.canAddDiscussion(this.forumId, group.id, { cmId: this.cmId })
 
                     // The call failed, let's return true so the group is shown.
                     // If the user can't post to it an error will be shown when he tries to add the discussion.
@@ -509,7 +520,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
             this.newDiscussion.message = null;
             this.newDiscussion.files = [];
             this.newDiscussion.postToAllGroups = false;
-            this.messageEditor.clearText();
+            this.messageEditor()?.clearText();
             this.originalData = CoreUtils.clone(this.newDiscussion);
         } else {
             CoreNavigator.back();
@@ -540,12 +551,12 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
         };
 
         if (!subject) {
-            CoreDomUtils.showErrorModal('addon.mod_forum.erroremptysubject', true);
+            CoreAlerts.showError(Translate.instant('addon.mod_forum.erroremptysubject'));
 
             return;
         }
         if (!message) {
-            CoreDomUtils.showErrorModal('addon.mod_forum.erroremptymessage', true);
+            CoreAlerts.showError(Translate.instant('addon.mod_forum.erroremptymessage'));
 
             return;
         }
@@ -583,18 +594,18 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
 
             if (discussionIds && discussionIds.length < groupIds.length) {
                 // Some discussions could not be created.
-                CoreDomUtils.showErrorModalDefault(null, 'addon.mod_forum.errorposttoallgroups', true);
+                CoreAlerts.showError(Translate.instant('addon.mod_forum.errorposttoallgroups'));
             }
 
             CoreForms.triggerFormSubmittedEvent(
-                this.formElement,
+                this.formElement(),
                 !!discussionIds,
                 CoreSites.getCurrentSiteId(),
             );
 
             this.returnToDiscussions(discussionIds, discTimecreated);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.mod_forum.cannotcreatediscussion', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.mod_forum.cannotcreatediscussion') });
         } finally {
             modal.dismiss();
         }
@@ -605,23 +616,23 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
      */
     async discard(): Promise<void> {
         try {
-            await CoreDomUtils.showConfirm(Translate.instant('core.areyousure'));
+            await CoreAlerts.confirm(Translate.instant('core.areyousure'));
 
             const promises: Promise<unknown>[] = [];
 
             promises.push(AddonModForumOffline.deleteNewDiscussion(this.forumId, this.timeCreated));
             promises.push(
-                CoreUtils.ignoreErrors(
+                CorePromiseUtils.ignoreErrors(
                     AddonModForumHelper.deleteNewDiscussionStoredFiles(this.forumId, this.timeCreated),
                 ),
             );
 
             await Promise.all(promises);
 
-            CoreForms.triggerFormCancelledEvent(this.formElement, CoreSites.getCurrentSiteId());
+            CoreForms.triggerFormCancelledEvent(this.formElement(), CoreSites.getCurrentSiteId());
 
             this.returnToDiscussions();
-        } catch (error) {
+        } catch {
             // Cancelled.
         }
     }
@@ -658,14 +669,15 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
 
         if (AddonModForumHelper.hasPostDataChanged(this.newDiscussion, this.originalData)) {
             // Show confirmation if some data has been modified.
-            await CoreDomUtils.showConfirm(Translate.instant('core.confirmcanceledit'));
+            await CoreAlerts.confirmLeaveWithChanges();
         }
 
         // Delete the local files from the tmp folder.
         CoreFileUploader.clearTmpFiles(this.newDiscussion.files);
 
-        if (this.formElement) {
-            CoreForms.triggerFormCancelledEvent(this.formElement, CoreSites.getCurrentSiteId());
+        const formElement = this.formElement();
+        if (formElement) {
+            CoreForms.triggerFormCancelledEvent(formElement, CoreSites.getCurrentSiteId());
         }
 
         return true;
@@ -691,7 +703,7 @@ export class AddonModForumNewDiscussionPage implements OnInit, OnDestroy, CanLea
     }
 
     /**
-     * Page destroyed.
+     * @inheritdoc
      */
     ngOnDestroy(): void {
         if (this.syncId) {
@@ -714,7 +726,7 @@ class AddonModForumNewDiscussionDiscussionsSwipeManager extends AddonModForumDis
     protected getSelectedItemPathFromRoute(route: ActivatedRouteSnapshot | ActivatedRoute): string | null {
         const params = CoreNavigator.getRouteParams(route);
 
-        return `${this.getSource().DISCUSSIONS_PATH_PREFIX}new/${params.timeCreated}`;
+        return `${this.getSource().discussionsPathPrefix}new/${params.timeCreated}`;
     }
 
 }

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, Signal } from '@angular/core';
 import { CoreNavigator } from '@services/navigator';
-import { CoreDomUtils } from '@services/utils/dom';
 import { CoreCourseModuleData } from '../services/course-helper';
 import { CoreCourseModuleMainResourceComponent } from './main-resource-component';
+import { CoreAlerts } from '@services/overlays/alerts';
 
 /**
  * Template class to easily create CoreCourseModuleMainComponent of resources (or activities without syncing).
@@ -26,7 +26,11 @@ import { CoreCourseModuleMainResourceComponent } from './main-resource-component
 })
 export class CoreCourseModuleMainActivityPage<ActivityType extends CoreCourseModuleMainResourceComponent> implements OnInit {
 
-    activityComponent?: ActivityType;
+    /**
+     * Activity component.
+     * This should be overridden with a viewChild in the child classes.
+     */
+    readonly activityComponent!: Signal<ActivityType>;
 
     title!: string;
     module!: CoreCourseModuleData;
@@ -40,8 +44,7 @@ export class CoreCourseModuleMainActivityPage<ActivityType extends CoreCourseMod
             this.module = CoreNavigator.getRequiredRouteParam<CoreCourseModuleData>('module');
             this.courseId = CoreNavigator.getRequiredRouteNumberParam('courseId');
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
-
+            CoreAlerts.showError(error);
             CoreNavigator.back();
 
             return;
@@ -54,8 +57,9 @@ export class CoreCourseModuleMainActivityPage<ActivityType extends CoreCourseMod
      * Update some data based on the activity instance.
      *
      * @param activity Activity instance.
+     * @param activity.name Activity name.
      */
-    updateData(activity: { name: string}): void {
+    updateData(activity: { name: string }): void {
         this.title = activity.name || this.title;
     }
 
@@ -63,28 +67,28 @@ export class CoreCourseModuleMainActivityPage<ActivityType extends CoreCourseMod
      * User entered the page.
      */
     ionViewDidEnter(): void {
-        this.activityComponent?.ionViewDidEnter();
+        this.activityComponent().ionViewDidEnter();
     }
 
     /**
      * User left the page.
      */
     ionViewDidLeave(): void {
-        this.activityComponent?.ionViewDidLeave();
+        this.activityComponent().ionViewDidLeave();
     }
 
     /**
      * User will enter the page.
      */
     ionViewWillEnter(): void {
-        this.activityComponent?.ionViewWillEnter();
+        this.activityComponent().ionViewWillEnter();
     }
 
     /**
      * User will leave the page.
      */
     ionViewWillLeave(): void {
-        this.activityComponent?.ionViewWillLeave();
+        this.activityComponent().ionViewWillLeave();
     }
 
 }

@@ -15,11 +15,12 @@
 import { FormControl, Validators } from '@angular/forms';
 import { Component } from '@angular/core';
 
-import { CoreTimeUtils } from '@services/utils/time';
-import { CoreUtils } from '@services/utils/utils';
-import { AuthEmailSignupProfileField } from '@features/login/services/login-helper';
+import { CoreTime } from '@static/time';
+import { CoreUtils } from '@static/utils';
+import { AuthEmailSignupProfileField } from '@features/login/services/signup';
 import { CoreUserProfileField } from '@features/user/services/user';
 import { CoreUserProfileFieldBaseComponent } from '@features/user/classes/base-profilefield-component';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Directive to render a datetime user profile field.
@@ -27,6 +28,9 @@ import { CoreUserProfileFieldBaseComponent } from '@features/user/classes/base-p
 @Component({
     selector: 'addon-user-profile-field-datetime',
     templateUrl: 'addon-user-profile-field-datetime.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
 export class AddonUserProfileFieldDatetimeComponent extends CoreUserProfileFieldBaseComponent<string | undefined> {
 
@@ -37,9 +41,7 @@ export class AddonUserProfileFieldDatetimeComponent extends CoreUserProfileField
     displayValue?: string;
 
     /**
-     * Init the data when the field is meant to be displayed without editing.
-     *
-     * @param field Field to render.
+     * @inheritdoc
      */
     protected initForNonEdit(field: CoreUserProfileField): void {
         if (field.displayvalue) {
@@ -52,9 +54,7 @@ export class AddonUserProfileFieldDatetimeComponent extends CoreUserProfileField
     }
 
     /**
-     * Init the data when the field is meant to be displayed for editing.
-     *
-     * @param field Field to render.
+     * @inheritdoc
      */
     protected initForEdit(field: AuthEmailSignupProfileField): void {
         super.initForEdit(field);
@@ -75,14 +75,12 @@ export class AddonUserProfileFieldDatetimeComponent extends CoreUserProfileField
             this.max = field.param2;
         }
 
-        this.min = this.min || CoreTimeUtils.getDatetimeDefaultMin();
-        this.max = this.max || CoreTimeUtils.getDatetimeDefaultMax();
+        this.min = this.min || CoreTime.getDatetimeDefaultMin();
+        this.max = this.max || CoreTime.getDatetimeDefaultMax();
     }
 
     /**
-     * Create the Form control.
-     *
-     * @returns Form control.
+     * @inheritdoc
      */
     protected createFormControl(field: AuthEmailSignupProfileField): FormControl<string | undefined> {
         const formData = {

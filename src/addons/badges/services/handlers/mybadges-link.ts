@@ -18,6 +18,7 @@ import { CoreContentLinksAction } from '@features/contentlinks/services/contentl
 import { CoreNavigator } from '@services/navigator';
 import { makeSingleton } from '@singletons';
 import { AddonBadges } from '../badges';
+import { ADDONS_BADGES_USER_PROFILE_FEATURE_NAME } from '@addons/badges/constants';
 
 /**
  * Handler to treat links to user badges page.
@@ -26,13 +27,11 @@ import { AddonBadges } from '../badges';
 export class AddonBadgesMyBadgesLinkHandlerService extends CoreContentLinksHandlerBase {
 
     name = 'AddonBadgesMyBadgesLinkHandler';
-    featureName = 'CoreUserDelegate_AddonBadges';
+    featureName = ADDONS_BADGES_USER_PROFILE_FEATURE_NAME;
     pattern = /\/badges\/mybadges\.php/;
 
     /**
-     * Get the list of actions for a link (url).
-     *
-     * @returns List of (or promise resolved with list of) actions.
+     * @inheritdoc
      */
     getActions(): CoreContentLinksAction[] {
         return [{
@@ -43,11 +42,7 @@ export class AddonBadgesMyBadgesLinkHandlerService extends CoreContentLinksHandl
     }
 
     /**
-     * Check if the handler is enabled for a certain site (site + user) and a URL.
-     * If not defined, defaults to true.
-     *
-     * @param siteId The site ID.
-     * @returns Whether the handler is enabled for the URL and site.
+     * @inheritdoc
      */
     async isEnabled(siteId: string): Promise<boolean> {
         return AddonBadges.isPluginEnabled(siteId);

@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Injectable, Type } from '@angular/core';
+import { Injectable, Type, inject } from '@angular/core';
 import { SafeUrl } from '@angular/platform-browser';
 
 import { CoreSite } from '@classes/sites/site';
 import { CoreCourseModuleDefaultHandler } from './handlers/default-module';
 import { CoreDelegate, CoreDelegateHandler } from '@classes/delegate';
 import { CoreCourseAnyCourseData } from '@features/courses/services/courses';
-import { CoreCourse } from './course';
+import { CoreCourseModuleHelper } from './course-module-helper';
 import { CoreSites } from '@services/sites';
 import { makeSingleton } from '@singletons';
 import { CoreCourseModuleData } from './course-helper';
-import { CoreNavigationOptions } from '@services/navigator';
-import { CoreIonicColorNames } from '@singletons/colors';
+import { CoreNavigationOptions, CoreNavigationOptionsWithSite } from '@services/navigator';
 import { DownloadStatus } from '@/core/constants';
+import { CORE_COURSE_MODULE_FEATURE_PREFIX } from '../constants';
+import { ModFeature } from '@addons/mod/constants';
+import { CoreCourseOverviewActivity, CoreCourseOverviewItem } from './course-overview';
 
 /**
  * Interface that all course module handlers must implement.
@@ -41,7 +43,7 @@ export interface CoreCourseModuleHandler extends CoreDelegateHandler {
      * This is to replicate the "plugin_supports" function of Moodle.
      * If you need some dynamic checks please implement the supportsFeature function.
      */
-    supportedFeatures?: Record<string, unknown>;
+    supportedFeatures?: Partial<Record<ModFeature, unknown>>;
 
     /**
      * Get the data required to display the module in the course contents view.
@@ -88,23 +90,13 @@ export interface CoreCourseModuleHandler extends CoreDelegateHandler {
     getIconSrc?(module?: CoreCourseModuleData, modicon?: string): Promise<string | undefined> | string | undefined;
 
     /**
-     * Check whether the icon should be treated as a shape or a rich image.
-     *
-     * @param module Module to get the icon from.
-     * @param modicon The mod icon string.
-     * @returns Whether the icon should be treated as a shape.
-     * @deprecated since 4.3. Now it uses platform information. This function is not used anymore.
-     */
-    iconIsShape?(module?: CoreCourseModuleData, modicon?: string): Promise<boolean | undefined> | boolean | undefined;
-
-    /**
      * Check if this type of module supports a certain feature.
      * If this function is implemented, the supportedFeatures object will be ignored.
      *
      * @param feature The feature to check.
      * @returns The result of the supports check.
      */
-    supportsFeature?(feature: string): unknown;
+    supportsFeature?(feature: ModFeature): unknown;
 
     /**
      * Return true to show the manual completion regardless of the course's showcompletionconditions setting.
@@ -123,7 +115,7 @@ export interface CoreCourseModuleHandler extends CoreDelegateHandler {
      * @param options Options for the navigation.
      * @returns Promise resolved when done.
      */
-    openActivityPage(module: CoreCourseModuleData, courseId: number, options?: CoreNavigationOptions): Promise<void>;
+    openActivityPage(module: CoreCourseModuleData, courseId: number, options?: CoreNavigationOptionsWithSite): Promise<void>;
 
     /**
      * Whether the activity is branded.
@@ -132,12 +124,34 @@ export interface CoreCourseModuleHandler extends CoreDelegateHandler {
      * @returns bool True if the activity is branded, false otherwise.
      */
     isBranded?(): Promise<boolean>;
+
+    /**
+     * Get the data to render a course overview item.
+     *
+     * @param item Item to get the content for.
+     * @param activity Activity data the item belongs to.
+     * @param courseId Course ID the item belongs to.
+     * @returns Data to render the item content. If undefined it means the app doesn't know how to render the item.
+     */
+    getOverviewItemContent?(
+        item: CoreCourseOverviewItem,
+        activity: CoreCourseOverviewActivity,
+        courseId: number,
+    ): Promise<CoreCourseOverviewItemContent | undefined>;
+
+    /**
+     * Get the forced language for a module, if any.
+     *
+     * @param module The module data.
+     * @returns The forced language, undefined if not set.
+     */
+    getModuleForcedLang(module: CoreCourseModuleData): Promise<string | undefined>;
 }
 
 /**
  * Data needed to render the module in course contents.
  */
-export interface CoreCourseModuleHandlerData {
+export type CoreCourseModuleHandlerData = {
     /**
      * The title to display in the module.
      */
@@ -164,13 +178,6 @@ export interface CoreCourseModuleHandlerData {
     extraBadge?: string;
 
     /**
-     * The color of the extra badge. Default: primary.
-     *
-     * @deprecated since 4.3 Not used anymore.
-     */
-    extraBadgeColor?: CoreIonicColorNames;
-
-    /**
      * Whether to display a button to download/refresh the module if it's downloadable.
      * If it's set to true, the app will show a download/refresh button when needed and will handle the download of the
      * module using CoreCourseModulePrefetchDelegate.
@@ -178,19 +185,12 @@ export interface CoreCourseModuleHandlerData {
     showDownloadButton?: boolean;
 
     /**
-     * Wether activity has the custom cmlist item flag enabled.
+     * Whether activity has the custom cmlist item flag enabled.
      *
      * Activities like label uses this flag to indicate that it should be
      * displayed as a custom course item instead of a tipical activity card.
      */
     hasCustomCmListItem?: boolean;
-
-    /**
-     * The buttons to display in the module item.
-     *
-     * @deprecated since 4.3 Use button instead. It will only display the first.
-     */
-    buttons?: CoreCourseModuleHandlerButton[];
 
     /**
      * The button to display in the module item.
@@ -229,7 +229,7 @@ export interface CoreCourseModuleHandlerData {
      * On Destroy function in case it's needed.
      */
     onDestroy?(): void;
-}
+};
 
 /**
  * Interface that all the components to render the module in singleactivity must implement.
@@ -248,7 +248,7 @@ export interface CoreCourseModuleMainComponent {
 /**
  * A button to display in a module item.
  */
-export interface CoreCourseModuleHandlerButton {
+export type CoreCourseModuleHandlerButton = {
     /**
      * The label to add to the button.
      */
@@ -274,7 +274,24 @@ export interface CoreCourseModuleHandlerButton {
      * @returns Promise resolved when done.
      */
     action(event: Event, module: CoreCourseModuleData, courseId: number, options?: CoreNavigationOptions): Promise<void> | void;
-}
+};
+
+/**
+ * Data to render a course overview item.
+ * It can either be a component class to render the item, or a string with content to display (if null, empty content).
+ */
+export type CoreCourseOverviewItemContent = (OverviewItemContentComponentData | { content: string | null }) & {
+    classes?: string[];
+};
+
+/**
+ * Data to render a course overview item using a component.
+ */
+type OverviewItemContentComponentData = {
+    component: Type<unknown>;
+    componentData?: Record<string, unknown>; // If set, extra data to pass to the component. By default, the app will pass the
+                                             // item and other data like the activity data and course ID.
+};
 
 /**
  * Delegate to register module handlers.
@@ -282,12 +299,9 @@ export interface CoreCourseModuleHandlerButton {
 @Injectable({ providedIn: 'root' })
 export class CoreCourseModuleDelegateService extends CoreDelegate<CoreCourseModuleHandler> {
 
-    protected featurePrefix = 'CoreCourseModuleDelegate_';
+    protected defaultHandler = inject(CoreCourseModuleDefaultHandler);
+    protected featurePrefix = CORE_COURSE_MODULE_FEATURE_PREFIX;
     protected handlerNameProperty = 'modName';
-
-    constructor(protected defaultHandler: CoreCourseModuleDefaultHandler) {
-        super('CoreCourseModuleDelegate');
-    }
 
     /**
      * Get the component to render the module.
@@ -347,7 +361,7 @@ export class CoreCourseModuleDelegateService extends CoreDelegate<CoreCourseModu
         modname: string,
         module: CoreCourseModuleData,
         courseId: number,
-        options?: CoreNavigationOptions,
+        options?: CoreNavigationOptionsWithSite,
     ): Promise<void> {
         return this.executeFunctionOnEnabled<void>(
             modname,
@@ -414,20 +428,30 @@ export class CoreCourseModuleDelegateService extends CoreDelegate<CoreCourseModu
     async getModuleIconSrc(modname: string, modicon?: string, module?: CoreCourseModuleData): Promise<string> {
         const icon = await this.executeFunctionOnEnabled<Promise<string>>(modname, 'getIconSrc', [module, modicon]);
 
-        return icon ?? CoreCourse.getModuleIconSrc(modname, modicon) ?? '';
+        return icon ?? CoreCourseModuleHelper.getModuleIconSrc(modname, modicon) ?? '';
     }
 
     /**
-     * Get whether the icon for the given module should be treated as a shape or a rich image.
+     * Get the data to render a course overview item.
      *
      * @param modname The name of the module type.
-     * @param modicon The mod icon string.
-     * @param module The module to use.
-     * @returns Whether the icon should be treated as a shape.
-     * @deprecated since 4.3. Now it uses platform information. This function is not used anymore.
+     * @param item Overview item data.
+     * @param activity Activity data the item belongs to.
+     * @param courseId Course ID the item belongs to.
+     * @returns Data to render the item.
      */
-    async moduleIconIsShape(modname: string, modicon?: string, module?: CoreCourseModuleData): Promise<boolean | undefined> {
-        return await this.executeFunctionOnEnabled<Promise<boolean>>(modname, 'iconIsShape', [module, modicon]);
+    async getOverviewItemContent(
+        modname: string,
+        item: CoreCourseOverviewItem,
+        activity: CoreCourseOverviewActivity,
+        courseId: number,
+    ): Promise<CoreCourseOverviewItemContent | undefined> {
+        // Support overview even if the handler is disabled.
+        return await this.executeFunction<CoreCourseOverviewItemContent>(
+            modname,
+            'getOverviewItemContent',
+            [item, activity, courseId],
+        );
     }
 
     /**
@@ -438,7 +462,7 @@ export class CoreCourseModuleDelegateService extends CoreDelegate<CoreCourseModu
      * @param defaultValue Value to return if the module is not supported or doesn't know if it's supported.
      * @returns The result of the supports check.
      */
-    supportsFeature<T = unknown>(modname: string, feature: string, defaultValue: T): T {
+    supportsFeature<T = unknown>(modname: string, feature: ModFeature, defaultValue: T): T {
         const handler = this.enabledHandlers[modname];
         let result: T | undefined;
 
@@ -466,6 +490,16 @@ export class CoreCourseModuleDelegateService extends CoreDelegate<CoreCourseModu
         const result = await this.executeFunctionOnEnabled<boolean>(module.modname, 'manualCompletionAlwaysShown', [module]);
 
         return !!result;
+    }
+
+    /**
+     * Get the forced language for a module, if any.
+     *
+     * @param module The module data.
+     * @returns The forced language, undefined if not set.
+     */
+    async getModuleForcedLang(module: CoreCourseModuleData): Promise<string | undefined> {
+        return await this.executeFunctionOnEnabled<string>(module.modname, 'getModuleForcedLang', [module]);
     }
 
 }

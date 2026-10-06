@@ -12,18 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { Component, OnDestroy, OnInit, viewChild } from '@angular/core';
+import { CoreEventObserver, CoreEvents } from '@static/events';
 import { CoreSites } from '@services/sites';
 import {
     AddonMessages,
     AddonMessagesConversationMember,
-    AddonMessagesProvider,
 } from '../../services/messages';
 import { CoreNavigator } from '@services/navigator';
 import { CoreScreen } from '@services/screen';
-import { CoreDomUtils } from '@services/utils/dom';
 import { CoreSplitViewComponent } from '@components/split-view/split-view';
+import { ADDON_MESSAGES_CONTACT_REQUESTS_COUNT_EVENT, ADDON_MESSAGES_MEMBER_INFO_CHANGED_EVENT } from '@addons/messages/constants';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { Translate } from '@singletons';
+import { CoreSharedModule } from '@/core/shared.module';
+import { Subscription } from 'rxjs';
+import { CorePushNotificationsDelegate } from '@features/pushnotifications/services/push-delegate';
+import { CorePushNotificationsNotificationBasicData } from '@features/pushnotifications/services/pushnotifications';
 
 /**
  * Page that displays contacts and contact requests.
@@ -31,14 +36,16 @@ import { CoreSplitViewComponent } from '@components/split-view/split-view';
 @Component({
     selector: 'page-addon-messages-contacts',
     templateUrl: 'contacts.html',
-    styleUrls: [
-        '../../messages-common.scss',
+    styleUrl: '../../messages-common.scss',
+    imports: [
+        CoreSharedModule,
     ],
 })
-export class AddonMessagesContactsPage implements OnInit, OnDestroy {
+export default class AddonMessagesContactsPage implements OnInit, OnDestroy {
 
-    @ViewChild(CoreSplitViewComponent) splitView!: CoreSplitViewComponent;
+    readonly splitView = viewChild.required(CoreSplitViewComponent);
 
+    protected pushObserver: Subscription;
     selected: 'confirmed' | 'requests' = 'confirmed';
     requestsBadge = '';
     selectedUserId?: number; // User id of the conversation opened in the split view.
@@ -65,7 +72,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
 
         // Update the contact requests badge.
         this.contactRequestsCountObserver = CoreEvents.on(
-            AddonMessagesProvider.CONTACT_REQUESTS_COUNT_EVENT,
+            ADDON_MESSAGES_CONTACT_REQUESTS_COUNT_EVENT,
             (data) => {
                 this.requestsBadge = data.count > 0 ? String(data.count) : '';
             },
@@ -74,7 +81,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
 
         // Update block status of a user.
         this.memberInfoObserver = CoreEvents.on(
-            AddonMessagesProvider.MEMBER_INFO_CHANGED_EVENT,
+            ADDON_MESSAGES_MEMBER_INFO_CHANGED_EVENT,
             (data) => {
                 if (data.userBlocked || data.userUnblocked) {
                     const user = this.confirmedContacts.find((user) => user.id == data.userId);
@@ -100,6 +107,19 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
             CoreSites.getCurrentSiteId(),
         );
 
+        this.pushObserver = CorePushNotificationsDelegate.on<CorePushNotificationsNotificationBasicData>('receive')
+            .subscribe((notification) => {
+                if (notification.name === 'messagecontactrequests') {
+                    AddonMessages.refreshContactRequestsCount();
+
+                    if (this.requestsLoaded) {
+                        // Contact requests notification, refresh contact requests list.
+                        this.requestsFetchData(true);
+                    } else {
+                        AddonMessages.invalidateContactRequestsCache();
+                    }
+                }
+        });
     }
 
     /**
@@ -108,9 +128,11 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
     async ngOnInit(): Promise<void> {
         AddonMessages.getContactRequestsCount(this.siteId); // Badge already updated by the observer.
 
-        this.selected === 'confirmed'
-            ? await this.initConfirmed()
-            : await this.initRequests();
+        if (this.selected === 'confirmed') {
+            await this.initConfirmed();
+        } else {
+            await this.initRequests();
+        }
     }
 
     /**
@@ -163,7 +185,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
      * @param refresh True if we are refreshing contacts, false if we are loading more.
      * @returns Promise resolved when done.
      */
-    async confirmedFetchData(refresh: boolean = false): Promise<void> {
+    async confirmedFetchData(refresh = false): Promise<void> {
         this.confirmedLoadMoreError = false;
 
         const limitFrom = refresh ? 0 : this.confirmedContacts.length;
@@ -179,7 +201,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
             this.confirmedCanLoadMore = result.canLoadMore;
         } catch (error) {
             this.confirmedLoadMoreError = true;
-            CoreDomUtils.showErrorModalDefault(error, 'addon.messages.errorwhileretrievingcontacts', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.messages.errorwhileretrievingcontacts') });
         }
     }
 
@@ -189,7 +211,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
      * @param refresh True if we are refreshing contact requests, false if we are loading more.
      * @returns Promise resolved when done.
      */
-    async requestsFetchData(refresh: boolean = false): Promise<void> {
+    async requestsFetchData(refresh = false): Promise<void> {
         this.requestsLoadMoreError = false;
 
         const limitFrom = refresh ? 0 : this.requests.length;
@@ -205,7 +227,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
             this.requestsCanLoadMore = result.canLoadMore;
         } catch (error) {
             this.requestsLoadMoreError = true;
-            CoreDomUtils.showErrorModalDefault(error, 'addon.messages.errorwhileretrievingcontacts', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.messages.errorwhileretrievingcontacts') });
         }
     }
 
@@ -294,8 +316,9 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
         this.selectedUserId = userId;
 
         const path = CoreNavigator.getRelativePathToParent('/messages/contacts') + `discussion/user/${userId}`;
+        const splitView = this.splitView();
         CoreNavigator.navigate(path, {
-            reset: CoreScreen.isTablet && !!this.splitView && !this.splitView.isNested,
+            reset: CoreScreen.isTablet && !!splitView && !splitView.isNested,
         });
     }
 
@@ -304,6 +327,7 @@ export class AddonMessagesContactsPage implements OnInit, OnDestroy {
      */
     ngOnDestroy(): void {
         this.contactRequestsCountObserver?.off();
+        this.pushObserver?.unsubscribe();
     }
 
 }

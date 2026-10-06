@@ -16,12 +16,13 @@ import { Injectable } from '@angular/core';
 import {
     CoreUserProfileHandlerType,
     CoreUserProfileHandler,
-    CoreUserProfileHandlerData,
+    CoreUserProfileListHandlerData,
     CoreUserDelegateContext,
 } from '@features/user/services/user-delegate';
 import { CoreNavigator } from '@services/navigator';
 import { makeSingleton } from '@singletons';
 import { CoreReportBuilder } from '../reportbuilder';
+import { CORE_REPORT_BUILDER_PAGE_NAME } from '@features/reportbuilder/constants';
 
 /**
  * Handler to visualize custom reports.
@@ -29,9 +30,7 @@ import { CoreReportBuilder } from '../reportbuilder';
 @Injectable({ providedIn: 'root' })
 export class CoreReportBuilderHandlerService implements CoreUserProfileHandler {
 
-    static readonly PAGE_NAME = 'reportbuilder';
-
-    type = CoreUserProfileHandlerType.LIST_ITEM;
+    readonly type = CoreUserProfileHandlerType.LIST_ITEM;
     cacheEnabled = true;
     name = 'CoreReportBuilderDelegate';
     priority = 350;
@@ -58,7 +57,7 @@ export class CoreReportBuilderHandlerService implements CoreUserProfileHandler {
     /**
      * @inheritdoc
      */
-    getDisplayData(): CoreUserProfileHandlerData {
+    getDisplayData(): CoreUserProfileListHandlerData {
         return {
             class: 'core-report-builder',
             icon: 'fas-rectangle-list',
@@ -66,7 +65,7 @@ export class CoreReportBuilderHandlerService implements CoreUserProfileHandler {
             action: async (event): Promise<void> => {
                 event.preventDefault();
                 event.stopPropagation();
-                await CoreNavigator.navigateToSitePath(CoreReportBuilderHandlerService.PAGE_NAME);
+                await CoreNavigator.navigateToSitePath(CORE_REPORT_BUILDER_PAGE_NAME);
             },
         };
     }

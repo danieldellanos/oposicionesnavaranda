@@ -13,11 +13,11 @@
 // limitations under the License.
 
 import { CanActivateFn } from '@angular/router';
-import { CoreApp } from '@services/app';
+import { CoreRedirects } from '@static/redirects';
 import { CoreRedirectPayload } from '@services/navigator';
 import { CoreSites } from '@services/sites';
 import { Router } from '@singletons';
-import { CoreConstants } from '../constants';
+import { NO_SITE_ID } from '@features/login/constants';
 
 /**
  * Guard to check if there is a pending redirect and trigger it.
@@ -25,13 +25,13 @@ import { CoreConstants } from '../constants';
  * @returns True if there's no redirect, redirection route otherwise.
  */
 export const redirectGuard: CanActivateFn = async () => {
-    const redirect = CoreApp.consumeMemoryRedirect();
+    const redirect = CoreRedirects.consumeMemoryRedirect();
         if (!redirect) {
             return true;
         }
 
         // Redirect to site path.
-        if (redirect.siteId && redirect.siteId !== CoreConstants.NO_SITE_ID) {
+        if (redirect.siteId && redirect.siteId !== NO_SITE_ID) {
             const redirectData: CoreRedirectPayload = {
                 urlToOpen: redirect.urlToOpen,
             };

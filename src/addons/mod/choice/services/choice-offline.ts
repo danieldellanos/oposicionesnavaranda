@@ -14,7 +14,7 @@
 
 import { Injectable } from '@angular/core';
 import { CoreSites } from '@services/sites';
-import { CoreText } from '@singletons/text';
+import { CoreText } from '@static/text';
 import { makeSingleton } from '@singletons';
 import { AddonModChoiceResponsesDBRecord, RESPONSES_TABLE_NAME } from './database/choice';
 
@@ -66,7 +66,7 @@ export class AddonModChoiceOfflineProvider {
             const response = await this.getResponse(choiceId, siteId, userId);
 
             return !!response.choiceid;
-        } catch (error) {
+        } catch {
             // No offline data found, return false.
             return false;
         }

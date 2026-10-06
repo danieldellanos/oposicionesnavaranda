@@ -16,7 +16,7 @@ import { Injectable } from '@angular/core';
 import { CoreFileUploaderStoreFilesResult } from '@features/fileuploader/services/fileuploader';
 import { CoreFile } from '@services/file';
 import { CoreSites } from '@services/sites';
-import { CoreText } from '@singletons/text';
+import { CoreText } from '@static/text';
 import { makeSingleton } from '@singletons';
 import {
     AddonModForumOfflineDiscussionDBRecord,
@@ -24,7 +24,7 @@ import {
     DISCUSSIONS_TABLE,
     REPLIES_TABLE,
 } from './database/offline';
-import { CorePath } from '@singletons/path';
+import { CorePath } from '@static/path';
 import { ADDON_MOD_FORUM_ALL_PARTICIPANTS } from '../constants';
 
 /**
@@ -106,9 +106,8 @@ export class AddonModForumOfflineProvider {
             const discussions = await this.getNewDiscussions(forumId, siteId, userId);
 
             return !!discussions.length;
-        } catch (error) {
+        } catch {
             // No offline data found, return false.
-
             return false;
         }
     }
@@ -220,9 +219,8 @@ export class AddonModForumOfflineProvider {
             const replies = await this.getForumReplies(forumId, siteId, userId);
 
             return !!replies.length;
-        } catch (error) {
+        } catch {
             // No offline data found, return false.
-
             return false;
         }
     }
@@ -260,9 +258,8 @@ export class AddonModForumOfflineProvider {
             const replies = await this.getDiscussionReplies(discussionId, siteId, userId);
 
             return !!replies.length;
-        } catch (error) {
+        } catch {
             // No offline data found, return false.
-
             return false;
         }
     }
@@ -342,7 +339,7 @@ export class AddonModForumOfflineProvider {
         const site = await CoreSites.getSite(siteId);
         const siteFolderPath = CoreFile.getSiteFolder(site.getId());
 
-        return CorePath.concatenatePaths(siteFolderPath, 'offlineforum/' + forumId);
+        return CorePath.concatenatePaths(siteFolderPath, `offlineforum/${forumId}`);
     }
 
     /**
@@ -356,7 +353,7 @@ export class AddonModForumOfflineProvider {
     async getNewDiscussionFolder(forumId: number, timeCreated: number, siteId?: string): Promise<string> {
         const folderPath = await this.getForumFolder(forumId, siteId);
 
-        return CorePath.concatenatePaths(folderPath, 'newdisc_' + timeCreated);
+        return CorePath.concatenatePaths(folderPath, `newdisc_${timeCreated}`);
     }
 
     /**
@@ -373,7 +370,7 @@ export class AddonModForumOfflineProvider {
         const site = await CoreSites.getSite(siteId);
         userId = userId || site.getUserId();
 
-        return CorePath.concatenatePaths(folderPath, 'reply_' + postId + '_' + userId);
+        return CorePath.concatenatePaths(folderPath, `reply_${postId}_${userId}`);
     }
 
     /**
@@ -384,7 +381,7 @@ export class AddonModForumOfflineProvider {
      */
     protected parseRecordsOptions<
         R extends { options: string },
-        O extends Record<string, unknown> = Record<string, unknown>
+        O extends Record<string, unknown> = Record<string, unknown>,
     >(records: R[]): (Omit<R, 'options'> & { options: O })[] {
         return records.map(record => this.parseRecordOptions(record));
     }
@@ -397,7 +394,7 @@ export class AddonModForumOfflineProvider {
      */
     protected parseRecordOptions<
         R extends { options: string },
-        O extends Record<string, unknown> = Record<string, unknown>
+        O extends Record<string, unknown> = Record<string, unknown>,
     >(record: R): Omit<R, 'options'> & { options: O } {
         record.options = CoreText.parseJSON(record.options);
 

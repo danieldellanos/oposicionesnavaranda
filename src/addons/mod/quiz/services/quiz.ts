@@ -17,7 +17,6 @@ import { Injectable } from '@angular/core';
 
 import { CoreError } from '@classes/errors/error';
 import { CoreWSError } from '@classes/errors/wserror';
-import { CoreSite } from '@classes/sites/site';
 import { CoreCourseCommonModWSOptions } from '@features/course/services/course';
 import { CoreCourseLogHelper } from '@features/course/services/log-helper';
 import { CoreGradesFormattedItem, CoreGradesHelper } from '@features/grades/services/grades-helper';
@@ -30,14 +29,13 @@ import {
 import { CoreQuestionDelegate } from '@features/question/services/question-delegate';
 import { CoreSites, CoreSitesCommonWSOptions, CoreSitesReadingStrategy } from '@services/sites';
 import { convertTextToHTMLElement } from '@/core/utils/create-html-element';
-import { CoreTimeUtils } from '@services/utils/time';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreTime } from '@static/time';
+import { CoreUtils } from '@static/utils';
 import { CoreStatusWithWarningsWSResponse, CoreWSExternalFile, CoreWSExternalWarning } from '@services/ws';
 import { makeSingleton, Translate } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { AddonModQuizAccessRuleDelegate } from './access-rules-delegate';
 import { AddonModQuizOffline, AddonModQuizQuestionsWithAnswers } from './quiz-offline';
-import { AddonModQuizAutoSyncData } from './quiz-sync';
 import { CoreSiteWSPreSets } from '@classes/sites/authenticated-site';
 import {
     QUESTION_INVALID_STATE_CLASSES,
@@ -48,15 +46,20 @@ import {
 import {
     ADDON_MOD_QUIZ_ATTEMPT_FINISHED_EVENT,
     AddonModQuizAttemptStates,
-    ADDON_MOD_QUIZ_COMPONENT,
+    ADDON_MOD_QUIZ_COMPONENT_LEGACY,
     AddonModQuizGradeMethods,
     AddonModQuizDisplayOptionsAttemptStates,
     ADDON_MOD_QUIZ_IMMEDIATELY_AFTER_PERIOD,
-    ADDON_MOD_QUIZ_AUTO_SYNCED,
+    AddonModQuizNavMethods,
 } from '../constants';
-import { CoreIonicColorNames } from '@singletons/colors';
+import { CoreIonicColorNames } from '@static/colors';
+import { CoreCacheUpdateFrequency } from '@/core/constants';
+import { CoreObject } from '@static/object';
+import { CoreArray } from '@static/array';
+import { CoreTextFormat } from '@static/text';
+import { CoreCourseModuleHelper, CoreCourseModuleStandardElements } from '@features/course/services/course-module-helper';
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -65,7 +68,6 @@ declare module '@singletons/events' {
      */
     export interface CoreEventsData {
         [ADDON_MOD_QUIZ_ATTEMPT_FINISHED_EVENT]: AddonModQuizAttemptFinishedData;
-        [ADDON_MOD_QUIZ_AUTO_SYNCED]: AddonModQuizAutoSyncData;
     }
 
 }
@@ -145,7 +147,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptAccessInformationCacheKey(quizId: number, attemptId: number): string {
-        return this.getAttemptAccessInformationCommonCacheKey(quizId) + ':' + attemptId;
+        return `${this.getAttemptAccessInformationCommonCacheKey(quizId)}:${attemptId}`;
     }
 
     /**
@@ -155,7 +157,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptAccessInformationCommonCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'attemptAccessInformation:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}attemptAccessInformation:${quizId}`;
     }
 
     /**
@@ -180,7 +182,7 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getAttemptAccessInformationCacheKey(quizId, attemptId),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -196,7 +198,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptDataCacheKey(attemptId: number, page: number): string {
-        return this.getAttemptDataCommonCacheKey(attemptId) + ':' + page;
+        return `${this.getAttemptDataCommonCacheKey(attemptId)}:${page}`;
     }
 
     /**
@@ -206,7 +208,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptDataCommonCacheKey(attemptId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'attemptData:' + attemptId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}attemptData:${attemptId}`;
     }
 
     /**
@@ -230,7 +232,7 @@ export class AddonModQuizProvider {
         const params: AddonModQuizGetAttemptDataWSParams = {
             attemptid: attemptId,
             page: page,
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -239,7 +241,7 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getAttemptDataCacheKey(attemptId, page),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -286,7 +288,7 @@ export class AddonModQuizProvider {
                 return (dueDate + (quiz.graceperiod ?? 0)) * 1000;
 
             default:
-                this.logger.warn('Unexpected state when getting due date: ' + attempt.state);
+                this.logger.warn(`Unexpected state when getting due date: ${attempt.state}`);
 
                 return 0;
         }
@@ -305,10 +307,10 @@ export class AddonModQuizProvider {
         if (attempt.state === AddonModQuizAttemptStates.OVERDUE) {
             return Translate.instant(
                 'addon.mod_quiz.overduemustbesubmittedby',
-                { $a: CoreTimeUtils.userDate(dueDate) },
+                { $a: CoreTime.userDate(dueDate) },
             );
         } else if (dueDate) {
-            return Translate.instant('addon.mod_quiz.mustbesubmittedby', { $a: CoreTimeUtils.userDate(dueDate) });
+            return Translate.instant('addon.mod_quiz.mustbesubmittedby', { $a: CoreTime.userDate(dueDate) });
         }
     }
 
@@ -418,17 +420,23 @@ export class AddonModQuizProvider {
      * @param finishedOffline Whether the attempt was finished offline.
      * @returns Readable state name.
      */
-    getAttemptReadableStateName(state: string, finishedOffline = false): string {
+    getAttemptReadableStateName(state?: AddonModQuizAttemptStates, finishedOffline = false): string {
         if (finishedOffline) {
             return Translate.instant('core.submittedoffline');
         }
 
         switch (state) {
+            case AddonModQuizAttemptStates.NOT_STARTED:
+                return Translate.instant('addon.mod_quiz.statenotstarted');
+
             case AddonModQuizAttemptStates.IN_PROGRESS:
                 return Translate.instant('addon.mod_quiz.stateinprogress');
 
             case AddonModQuizAttemptStates.OVERDUE:
                 return Translate.instant('addon.mod_quiz.stateoverdue');
+
+            case AddonModQuizAttemptStates.SUBMITTED:
+                return Translate.instant('addon.mod_quiz.statesubmitted');
 
             case AddonModQuizAttemptStates.FINISHED:
                 return Translate.instant('addon.mod_quiz.statefinished');
@@ -448,17 +456,23 @@ export class AddonModQuizProvider {
      * @param finishedOffline Whether the attempt was finished offline.
      * @returns State color.
      */
-    getAttemptStateColor(state: string, finishedOffline = false): string {
+    getAttemptStateColor(state?: AddonModQuizAttemptStates, finishedOffline = false): string {
         if (finishedOffline) {
             return CoreIonicColorNames.MEDIUM;
         }
 
         switch (state) {
+            case AddonModQuizAttemptStates.NOT_STARTED:
+                return CoreIonicColorNames.INFO;
+
             case AddonModQuizAttemptStates.IN_PROGRESS:
                 return CoreIonicColorNames.WARNING;
 
             case AddonModQuizAttemptStates.OVERDUE:
                 return CoreIonicColorNames.INFO;
+
+            case AddonModQuizAttemptStates.SUBMITTED:
+                return CoreIonicColorNames.SUCCESS;
 
             case AddonModQuizAttemptStates.FINISHED:
                 return CoreIonicColorNames.SUCCESS;
@@ -479,7 +493,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptReviewCacheKey(attemptId: number, page: number): string {
-        return this.getAttemptReviewCommonCacheKey(attemptId) + ':' + page;
+        return `${this.getAttemptReviewCommonCacheKey(attemptId)}:${page}`;
     }
 
     /**
@@ -489,7 +503,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptReviewCommonCacheKey(attemptId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'attemptReview:' + attemptId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}attemptReview:${attemptId}`;
     }
 
     /**
@@ -513,8 +527,9 @@ export class AddonModQuizProvider {
         };
         const preSets = {
             cacheKey: this.getAttemptReviewCacheKey(attemptId, page),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
+            deleteCacheIfWSError: true,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
@@ -532,7 +547,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getAttemptSummaryCacheKey(attemptId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'attemptSummary:' + attemptId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}attemptSummary:${attemptId}`;
     }
 
     /**
@@ -553,7 +568,7 @@ export class AddonModQuizProvider {
 
         const params: AddonModQuizGetAttemptSummaryWSParams = {
             attemptid: attemptId,
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -562,7 +577,7 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getAttemptSummaryCacheKey(attemptId),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -572,7 +587,7 @@ export class AddonModQuizProvider {
         const questions = CoreQuestion.parseQuestions(response.questions);
 
         if (options.loadLocal) {
-            return AddonModQuizOffline.loadQuestionsLocalStates(attemptId, questions, site.getId());
+            await AddonModQuizOffline.loadQuestionsLocalStates(attemptId, questions, site.getId());
         }
 
         return questions;
@@ -586,7 +601,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getCombinedReviewOptionsCacheKey(quizId: number, userId: number): string {
-        return this.getCombinedReviewOptionsCommonCacheKey(quizId) + ':' + userId;
+        return `${this.getCombinedReviewOptionsCommonCacheKey(quizId)}:${userId}`;
     }
 
     /**
@@ -596,7 +611,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getCombinedReviewOptionsCommonCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'combinedReviewOptions:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}combinedReviewOptions:${quizId}`;
     }
 
     /**
@@ -619,7 +634,7 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getCombinedReviewOptionsCacheKey(quizId, userId),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -632,8 +647,8 @@ export class AddonModQuizProvider {
 
         // Convert the arrays to objects with name -> value.
         return {
-            someoptions: <Record<string, number>> CoreUtils.objectToKeyValueMap(response.someoptions, 'name', 'value'),
-            alloptions: <Record<string, number>> CoreUtils.objectToKeyValueMap(response.alloptions, 'name', 'value'),
+            someoptions: <Record<string, number>> CoreObject.toKeyValueMap(response.someoptions, 'name', 'value'),
+            alloptions: <Record<string, number>> CoreObject.toKeyValueMap(response.alloptions, 'name', 'value'),
             warnings: response.warnings,
         };
     }
@@ -646,7 +661,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getFeedbackForGradeCacheKey(quizId: number, grade: number): string {
-        return this.getFeedbackForGradeCommonCacheKey(quizId) + ':' + grade;
+        return `${this.getFeedbackForGradeCommonCacheKey(quizId)}:${grade}`;
     }
 
     /**
@@ -656,7 +671,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getFeedbackForGradeCommonCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'feedbackForGrade:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}feedbackForGrade:${quizId}`;
     }
 
     /**
@@ -680,8 +695,8 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getFeedbackForGradeCacheKey(quizId, grade),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -701,7 +716,7 @@ export class AddonModQuizProvider {
             quiz.questiondecimalpoints = -1;
         }
 
-        if (quiz.questiondecimalpoints == -1) {
+        if (quiz.questiondecimalpoints === -1) {
             return quiz.decimalpoints ?? 1;
         }
 
@@ -769,7 +784,7 @@ export class AddonModQuizProvider {
         const messages: string[] = [];
 
         questions.forEach((question) => {
-            if (question.type != 'random' && !CoreQuestionDelegate.isQuestionSupported(question.type)) {
+            if (question.type !== 'random' && !CoreQuestionDelegate.isQuestionSupported(question.type)) {
                 // The question isn't supported.
                 messages.push(Translate.instant('core.question.questionmessage', {
                     $a: question.slot,
@@ -794,7 +809,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getQuizDataCacheKey(courseId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'quiz:' + courseId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}quiz:${courseId}`;
     }
 
     /**
@@ -808,8 +823,8 @@ export class AddonModQuizProvider {
      */
     protected async getQuizByField(
         courseId: number,
-        key: string,
-        value: unknown,
+        key: 'coursemodule' | 'id',
+        value: number,
         options: CoreSitesCommonWSOptions = {},
     ): Promise<AddonModQuizQuizWSData> {
 
@@ -820,8 +835,8 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getQuizDataCacheKey(courseId),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
@@ -832,13 +847,7 @@ export class AddonModQuizProvider {
         );
 
         // Search the quiz.
-        const quiz = response.quizzes.find(quiz => quiz[key] == value);
-
-        if (!quiz) {
-            throw new CoreError(Translate.instant('core.course.modulenotfound'));
-        }
-
-        return quiz;
+        return CoreCourseModuleHelper.getActivityByField(response.quizzes, key, value);
     }
 
     /**
@@ -872,7 +881,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getQuizAccessInformationCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'quizAccessInformation:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}quizAccessInformation:${quizId}`;
     }
 
     /**
@@ -893,7 +902,7 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getQuizAccessInformationCacheKey(quizId),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -902,29 +911,29 @@ export class AddonModQuizProvider {
     }
 
     /**
-     * Get a readable Quiz grade method.
+     * Get a translatable Quiz grade method.
      *
      * @param method Grading method.
-     * @returns Readable grading method.
+     * @returns Translatable grading method.
      */
     getQuizGradeMethod(method?: number | string): string {
         if (method === undefined) {
             return '';
         }
 
-        if (typeof method == 'string') {
+        if (typeof method === 'string') {
             method = parseInt(method, 10);
         }
 
         switch (method) {
             case AddonModQuizGradeMethods.HIGHEST_GRADE:
-                return Translate.instant('addon.mod_quiz.gradehighest');
+                return 'addon.mod_quiz.gradehighest';
             case AddonModQuizGradeMethods.AVERAGE_GRADE:
-                return Translate.instant('addon.mod_quiz.gradeaverage');
+                return 'addon.mod_quiz.gradeaverage';
             case AddonModQuizGradeMethods.FIRST_ATTEMPT:
-                return Translate.instant('addon.mod_quiz.attemptfirst');
+                return 'addon.mod_quiz.attemptfirst';
             case AddonModQuizGradeMethods.LAST_ATTEMPT:
-                return Translate.instant('addon.mod_quiz.attemptlast');
+                return 'addon.mod_quiz.attemptlast';
             default:
                 return '';
         }
@@ -937,7 +946,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getQuizRequiredQtypesCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'quizRequiredQtypes:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}quizRequiredQtypes:${quizId}`;
     }
 
     /**
@@ -955,8 +964,8 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getQuizRequiredQtypesCacheKey(quizId),
-            updateFrequency: CoreSite.FREQUENCY_SOMETIMES,
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.SOMETIMES,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -992,7 +1001,7 @@ export class AddonModQuizProvider {
         let page = 0;
 
         for (let i = 0; i < split.length; i++) {
-            if (split[i] == '0') {
+            if (split[i] === '0') {
                 pages.push(page);
                 page++;
             }
@@ -1024,7 +1033,7 @@ export class AddonModQuizProvider {
         for (let i = 0; i < split.length; i++) {
             const value = Number(split[i]);
 
-            if (value == 0) {
+            if (value === 0) {
                 page++;
                 pageAdded = false;
             } else if (!pageAdded && questions[value]) {
@@ -1046,7 +1055,7 @@ export class AddonModQuizProvider {
         const notSupported: string[] = [];
 
         questionTypes.forEach((type) => {
-            if (type != 'random' && !CoreQuestionDelegate.isQuestionSupported(type)) {
+            if (type !== 'random' && !CoreQuestionDelegate.isQuestionSupported(type)) {
                 notSupported.push(type);
             }
         });
@@ -1080,7 +1089,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getUserAttemptsCacheKey(quizId: number, userId: number): string {
-        return this.getUserAttemptsCommonCacheKey(quizId) + ':' + userId;
+        return `${this.getUserAttemptsCommonCacheKey(quizId)}:${userId}`;
     }
 
     /**
@@ -1090,7 +1099,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getUserAttemptsCommonCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'userAttempts:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}userAttempts:${quizId}`;
     }
 
     /**
@@ -1111,23 +1120,43 @@ export class AddonModQuizProvider {
         const site = await CoreSites.getSite(options.siteId);
 
         const userId = options.userId || site.getUserId();
-        const params: AddonModQuizGetUserAttemptsWSParams = {
-            quizid: quizId,
-            userid: userId,
-            status: status,
-            includepreviews: !!includePreviews,
-        };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getUserAttemptsCacheKey(quizId, userId),
-            updateFrequency: CoreSite.FREQUENCY_SOMETIMES,
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.SOMETIMES,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
-        const response = await site.read<AddonModQuizGetUserAttemptsWSResponse>('mod_quiz_get_user_attempts', params, preSets);
+        if (site.wsAvailable('mod_quiz_get_user_quiz_attempts')) {
+            // @since Moodle 5.0.
+            const params: AddonModQuizGetUserQuizAttemptsWSParams = {
+                quizid: quizId,
+                userid: userId,
+                status: status,
+                includepreviews: !!includePreviews,
+            };
 
-        return response.attempts;
+            const response = await site.read<AddonModQuizGetUserQuizAttemptsWSResponse>(
+                'mod_quiz_get_user_quiz_attempts',
+                params,
+                preSets,
+            );
+
+            return response.attempts;
+        } else {
+            // @deprecatedonmoodle 5.0.
+            const params: AddonModQuizGetUserAttemptsWSParams = {
+                quizid: quizId,
+                userid: userId,
+                status: status,
+                includepreviews: !!includePreviews,
+            };
+
+            const response = await site.read<AddonModQuizGetUserAttemptsWSResponse>('mod_quiz_get_user_attempts', params, preSets);
+
+            return response.attempts;
+        }
     }
 
     /**
@@ -1138,7 +1167,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getUserBestGradeCacheKey(quizId: number, userId: number): string {
-        return this.getUserBestGradeCommonCacheKey(quizId) + ':' + userId;
+        return `${this.getUserBestGradeCommonCacheKey(quizId)}:${userId}`;
     }
 
     /**
@@ -1148,7 +1177,7 @@ export class AddonModQuizProvider {
      * @returns Cache key.
      */
     protected getUserBestGradeCommonCacheKey(quizId: number): string {
-        return AddonModQuizProvider.ROOT_CACHE_KEY + 'userBestGrade:' + quizId;
+        return `${AddonModQuizProvider.ROOT_CACHE_KEY}userBestGrade:${quizId}`;
     }
 
     /**
@@ -1168,7 +1197,7 @@ export class AddonModQuizProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getUserBestGradeCacheKey(quizId, userId),
-            component: ADDON_MOD_QUIZ_COMPONENT,
+            component: ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -1184,7 +1213,6 @@ export class AddonModQuizProvider {
      * @param attemptId Attempt ID to invalidate some WS calls.
      * @param siteId Site ID. If not defined, current site.
      * @param userId User ID. If not defined use site's current user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAllQuizData(
         quizId: number,
@@ -1223,7 +1251,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptAccessInformation(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1237,7 +1264,6 @@ export class AddonModQuizProvider {
      * @param quizId Quiz ID.
      * @param attemptId Attempt ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptAccessInformationForAttempt(quizId: number, attemptId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1250,7 +1276,6 @@ export class AddonModQuizProvider {
      *
      * @param attemptId Attempt ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptData(attemptId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1264,7 +1289,6 @@ export class AddonModQuizProvider {
      * @param attemptId Attempt ID.
      * @param page Page.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptDataForPage(attemptId: number, page: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1277,7 +1301,6 @@ export class AddonModQuizProvider {
      *
      * @param attemptId Attempt ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptReview(attemptId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1291,7 +1314,6 @@ export class AddonModQuizProvider {
      * @param attemptId Attempt ID.
      * @param page Page.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptReviewForPage(attemptId: number, page: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1304,7 +1326,6 @@ export class AddonModQuizProvider {
      *
      * @param attemptId Attempt ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAttemptSummary(attemptId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1317,7 +1338,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateCombinedReviewOptions(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1331,12 +1351,11 @@ export class AddonModQuizProvider {
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
      * @param userId User ID. If not defined use site's current user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateCombinedReviewOptionsForUser(quizId: number, siteId?: string, userId?: number): Promise<void> {
         const site = await CoreSites.getSite(siteId);
 
-        return site.invalidateWsCacheForKey(this.getCombinedReviewOptionsCacheKey(quizId, userId || site.getUserId()));
+        await site.invalidateWsCacheForKey(this.getCombinedReviewOptionsCacheKey(quizId, userId || site.getUserId()));
     }
 
     /**
@@ -1345,7 +1364,6 @@ export class AddonModQuizProvider {
      * @param moduleId The module ID.
      * @param courseId Course ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateContent(moduleId: number, courseId: number, siteId?: string): Promise<void> {
         siteId = siteId || CoreSites.getCurrentSiteId();
@@ -1369,7 +1387,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateFeedback(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1383,7 +1400,6 @@ export class AddonModQuizProvider {
      * @param quizId Quiz ID.
      * @param grade Grade.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateFeedbackForGrade(quizId: number, grade: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1397,7 +1413,6 @@ export class AddonModQuizProvider {
      * @param courseId Course ID.
      * @param siteId Site ID. If not defined, current site.
      * @param userId User ID. If not defined use site's current user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateGradeFromGradebook(courseId: number, siteId?: string, userId?: number): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1410,7 +1425,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateQuizAccessInformation(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1423,7 +1437,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateQuizRequiredQtypes(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1436,7 +1449,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserAttempts(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1450,7 +1462,6 @@ export class AddonModQuizProvider {
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
      * @param userId User ID. If not defined use site's current user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserAttemptsForUser(quizId: number, siteId?: string, userId?: number): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1463,7 +1474,6 @@ export class AddonModQuizProvider {
      *
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserBestGrade(quizId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1477,7 +1487,6 @@ export class AddonModQuizProvider {
      * @param quizId Quiz ID.
      * @param siteId Site ID. If not defined, current site.
      * @param userId User ID. If not defined use site's current user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserBestGradeForUser(quizId: number, siteId?: string, userId?: number): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1490,7 +1499,6 @@ export class AddonModQuizProvider {
      *
      * @param courseId Course ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateQuizData(courseId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1504,7 +1512,7 @@ export class AddonModQuizProvider {
      * @param state Attempt's state.
      * @returns Whether it's finished.
      */
-    isAttemptCompleted(state?: string): boolean {
+    isAttemptCompleted(state?: AddonModQuizAttemptStates): boolean {
         return state === AddonModQuizAttemptStates.FINISHED || state === AddonModQuizAttemptStates.ABANDONED;
     }
 
@@ -1578,7 +1586,7 @@ export class AddonModQuizProvider {
      * @returns Whether navigation is sequential.
      */
     isNavigationSequential(quiz: AddonModQuizQuizWSData): boolean {
-        return quiz.navmethod == 'sequential';
+        return quiz.navmethod === AddonModQuizNavMethods.SEQ;
     }
 
     /**
@@ -1633,7 +1641,7 @@ export class AddonModQuizProvider {
      */
     async logViewAttempt(
         attemptId: number,
-        page: number = 0,
+        page = 0,
         preflightData: Record<string, string> = {},
         offline?: boolean,
         siteId?: string,
@@ -1643,7 +1651,7 @@ export class AddonModQuizProvider {
         const params: AddonModQuizViewAttemptWSParams = {
             attemptid: attemptId,
             page: page,
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -1675,7 +1683,7 @@ export class AddonModQuizProvider {
         return CoreCourseLogHelper.log(
             'mod_quiz_view_attempt_review',
             params,
-            ADDON_MOD_QUIZ_COMPONENT,
+            ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             quizId,
             siteId,
         );
@@ -1698,7 +1706,7 @@ export class AddonModQuizProvider {
     ): Promise<void> {
         const params: AddonModQuizViewAttemptSummaryWSParams = {
             attemptid: attemptId,
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -1708,7 +1716,7 @@ export class AddonModQuizProvider {
         return CoreCourseLogHelper.log(
             'mod_quiz_view_attempt_summary',
             params,
-            ADDON_MOD_QUIZ_COMPONENT,
+            ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             quizId,
             siteId,
         );
@@ -1729,7 +1737,7 @@ export class AddonModQuizProvider {
         return CoreCourseLogHelper.log(
             'mod_quiz_view_quiz',
             params,
-            ADDON_MOD_QUIZ_COMPONENT,
+            ADDON_MOD_QUIZ_COMPONENT_LEGACY,
             id,
             siteId,
         );
@@ -1788,10 +1796,10 @@ export class AddonModQuizProvider {
 
         const params: AddonModQuizProcessAttemptWSParams = {
             attemptid: attemptId,
-            data: CoreUtils.objectToArrayOfObjects(data, 'name', 'value'),
+            data: CoreObject.toArrayOfObjects(data, 'name', 'value'),
             finishattempt: !!finish,
             timeup: !!timeUp,
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -1837,7 +1845,7 @@ export class AddonModQuizProvider {
         });
 
         // Convert the question array to an object.
-        const questions = CoreUtils.arrayToObject(questionsArray, 'slot');
+        const questions = CoreArray.toObject(questionsArray, 'slot');
 
         return AddonModQuizOffline.processAttempt(quiz, attempt, questions, data, finish, siteId);
     }
@@ -1942,8 +1950,8 @@ export class AddonModQuizProvider {
 
         const params: AddonModQuizSaveAttemptWSParams = {
             attemptid: attemptId,
-            data: CoreUtils.objectToArrayOfObjects(data, 'name', 'value'),
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            data: CoreObject.toArrayOfObjects(data, 'name', 'value'),
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -1970,7 +1978,7 @@ export class AddonModQuizProvider {
      * @returns Whether time left should be displayed.
      */
     shouldShowTimeLeft(rules: string[], attempt: AddonModQuizAttemptWSData, endTime: number): boolean {
-        const timeNow = CoreTimeUtils.timestamp();
+        const timeNow = CoreTime.timestamp();
 
         if (attempt.state !== AddonModQuizAttemptStates.IN_PROGRESS) {
             return false;
@@ -1998,7 +2006,7 @@ export class AddonModQuizProvider {
 
         const params: AddonModQuizStartAttemptWSParams = {
             quizid: quizId,
-            preflightdata: CoreUtils.objectToArrayOfObjects<AddonModQuizPreflightDataWSParam>(
+            preflightdata: CoreObject.toArrayOfObjects<AddonModQuizPreflightDataWSParam>(
                 preflightData,
                 'name',
                 'value',
@@ -2014,6 +2022,16 @@ export class AddonModQuizProvider {
         }
 
         return response.attempt;
+    }
+
+    /**
+     * Check if a new attempt can be started based on the last attempt state.
+     *
+     * @param state Last attempt state. If not defined, it will be considered that there is no previous attempt.
+     * @returns Whether a new attempt can be started.
+     */
+    canStartAttemptBasedOnLastState(state?: AddonModQuizAttemptStates): boolean {
+        return !state || state === AddonModQuizAttemptStates.NOT_STARTED || this.isAttemptCompleted(state);
     }
 
 }
@@ -2116,7 +2134,7 @@ export type AddonModQuizAttemptWSData = {
     layout?: string; // Attempt layout.
     currentpage?: number; // Attempt current page.
     preview?: number; // Whether is a preview attempt or not.
-    state?: string; // The current state of the attempts. 'inprogress', 'overdue', 'finished' or 'abandoned'.
+    state?: AddonModQuizAttemptStates; // The current state of the attempts.
     timestart?: number; // Time when the attempt was started.
     timefinish?: number; // Time when the attempt was submitted. 0 if the attempt has not been submitted yet.
     timemodified?: number; // Last modified time.
@@ -2128,6 +2146,12 @@ export type AddonModQuizAttemptWSData = {
         grade: number; // The grade this attempt earned for this item.
         maxgrade: number; // The total this grade is out of.
     }[];
+    gradednotificationsenttime?: number; // Time when the student was notified that manual grading of their attempt was complete.
+    feedback?: { // @since 5.2.
+        feedbacktext: string; // Feedback text to display (only if set).
+        feedbacktextformat?: CoreTextFormat; // Feedback format (only if set).
+        feedbackinlinefiles?: CoreWSExternalFile[]; // Feedback inline files (only if set).
+    };
 };
 
 /**
@@ -2235,7 +2259,7 @@ export type AddonModQuizGetQuizFeedbackForGradeWSParams = {
  */
 export type AddonModQuizGetQuizFeedbackForGradeWSResponse = {
     feedbacktext: string; // The comment that corresponds to this grade (empty for none).
-    feedbacktextformat?: number; // Feedbacktext format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    feedbacktextformat?: CoreTextFormat; // Feedbacktext format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
     feedbackinlinefiles?: CoreWSExternalFile[];
     warnings?: CoreWSExternalWarning[];
 };
@@ -2258,14 +2282,7 @@ export type AddonModQuizGetQuizzesByCoursesWSResponse = {
 /**
  * Quiz data returned by mod_quiz_get_quizzes_by_courses WS.
  */
-export type AddonModQuizQuizWSData = {
-    id: number; // Standard Moodle primary key.
-    course: number; // Foreign key reference to the course this quiz is part of.
-    coursemodule: number; // Course module id.
-    name: string; // Quiz name.
-    intro?: string; // Quiz introduction text.
-    introformat?: number; // Intro format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
-    introfiles?: CoreWSExternalFile[];
+export type AddonModQuizQuizWSData = CoreCourseModuleStandardElements & {
     timeopen?: number; // The time when this quiz opens. (0 = no restriction.).
     timeclose?: number; // The time when this quiz closes. (0 = no restriction.).
     timelimit?: number; // The time limit for quiz attempts, in seconds.
@@ -2287,7 +2304,7 @@ export type AddonModQuizQuizWSData = {
     reviewrightanswer?: number; // Whether users are allowed to review their quiz attempts at various times.
     reviewoverallfeedback?: number; // Whether users are allowed to review their quiz attempts at various times.
     questionsperpage?: number; // How often to insert a page break when editing the quiz, or when shuffling the question order.
-    navmethod?: string; // Any constraints on how the user is allowed to navigate around the quiz.
+    navmethod?: AddonModQuizNavMethods; // Any constraints on how the user is allowed to navigate around the quiz.
     shuffleanswers?: number; // Whether the parts of the question should be shuffled, in those question types that support it.
     sumgrades?: number | null; // The total of all the question instance maxmarks.
     grade?: number; // The total that the quiz overall grade is scaled to be out of.
@@ -2306,10 +2323,6 @@ export type AddonModQuizQuizWSData = {
     autosaveperiod?: number; // Auto-save delay.
     hasfeedback?: number; // Whether the quiz has any non-blank feedback text.
     hasquestions?: number; // Whether the quiz has questions.
-    section?: number; // Course section id.
-    visible?: number; // Module visibility.
-    groupmode?: number; // Group mode.
-    groupingid?: number; // Grouping id.
 };
 
 /**
@@ -2350,7 +2363,9 @@ export type AddonModQuizGetQuizRequiredQtypesWSResponse = {
 };
 
 /**
- * Params of mod_quiz_get_user_attempts WS.
+ * Params of mod_quiz_get_user_attempts WS. (Deprecated in favour of mod_quiz_get_user_quiz_attempts).
+ *
+ * @deprecatedonmoodle 5.0.
  */
 export type AddonModQuizGetUserAttemptsWSParams = {
     quizid: number; // Quiz instance id.
@@ -2360,9 +2375,29 @@ export type AddonModQuizGetUserAttemptsWSParams = {
 };
 
 /**
- * Data returned by mod_quiz_get_user_attempts WS.
+ * Data returned by mod_quiz_get_user_attempts WS. (Deprecated in favour of mod_quiz_get_user_quiz_attempts).
+ *
+ * @deprecatedonmoodle 5.0.
  */
 export type AddonModQuizGetUserAttemptsWSResponse = {
+    attempts: AddonModQuizAttemptWSData[];
+    warnings?: CoreWSExternalWarning[];
+};
+
+/**
+ * Params of mod_quiz_get_user_quiz_attempts WS.
+ */
+export type AddonModQuizGetUserQuizAttemptsWSParams = {
+    quizid: number; // Quiz instance id.
+    userid?: number; // User id, empty for current user.
+    status?: string; // Quiz status: all, finished or unfinished.
+    includepreviews?: boolean; // Whether to include previews or not.
+};
+
+/**
+ * Data returned by mod_quiz_get_user_quiz_attempts WS.
+ */
+export type AddonModQuizGetUserQuizAttemptsWSResponse = {
     attempts: AddonModQuizAttemptWSData[];
     warnings?: CoreWSExternalWarning[];
 };
@@ -2382,6 +2417,11 @@ export type AddonModQuizGetUserBestGradeWSResponse = {
     hasgrade: boolean; // Whether the user has a grade on the given quiz.
     grade?: SafeNumber; // The grade (only if the user has a grade).
     gradetopass?: number; // @since 3.11. The grade to pass the quiz (only if set).
+    feedback?: { // @since 5.2.
+        feedbacktext: string; // Feedback text to display (only if set).
+        feedbacktextformat?: CoreTextFormat; // Feedback format (only if set).
+        feedbackinlinefiles?: CoreWSExternalFile[]; // Feedback inline files (only if set).
+    };
     warnings?: CoreWSExternalWarning[];
 };
 
@@ -2412,7 +2452,7 @@ export type AddonModQuizProcessAttemptWSParams = {
  * Data returned by mod_quiz_process_attempt WS.
  */
 export type AddonModQuizProcessAttemptWSResponse = {
-    state: string; // The new attempt state: inprogress, finished, overdue, abandoned.
+    state: Exclude<AddonModQuizAttemptStates, AddonModQuizAttemptStates.NOT_STARTED>; // The new attempt state.
     warnings?: CoreWSExternalWarning[];
 };
 

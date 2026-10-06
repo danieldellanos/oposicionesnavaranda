@@ -1,11 +1,14 @@
-@core_courses @app @javascript
+@app_parallel_run_courses @core_courses @app @core @core_my @block_myoverview @block_timeline @javascript
 Feature: Test basic usage of courses in app
   In order to participate in the courses while using the mobile app
   As a student
   I need basic courses functionality to work
 
   Background:
-    Given the following "users" exist:
+    Given the following config values are set as admin:
+      | enablemyhome    | 1 |
+      | enablemycourses | 1 |
+    And the following "users" exist:
       | username | firstname | lastname | email |
       | teacher1 | Teacher | teacher | teacher1@example.com |
       | student1 | Student | student | student1@example.com |
@@ -102,6 +105,8 @@ Feature: Test basic usage of courses in app
     And I press "Search" "button" in the app
     Then I should find "Course 4" in the app
     And the header should be "Available courses" in the app
+    And "Show only my courses" "ion-toggle" should not be selected in the app
+
 
     When I press "Course 4" in the app
     Then I should find "Course 4" in the app

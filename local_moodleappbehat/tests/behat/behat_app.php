@@ -51,14 +51,10 @@ class behat_app extends behat_app_helper {
     protected $scenariolaststep;
 
     /**
-     * @BeforeScenario
+     * @BeforeScenario @app
      */
     public function before_scenario(ScenarioScope $scope) {
         $feature = $scope->getFeature();
-
-        if (!$feature->hasTag('app')) {
-            return;
-        }
 
         $steps = $scope->getScenario()->getSteps();
 
@@ -101,7 +97,7 @@ class behat_app extends behat_app_helper {
      * @throws dml_exception Problem with Moodle setup
      * @throws ExpectationException Problem with resizing window
      */
-    public function i_enter_the_app(string $username = null) {
+    public function i_enter_the_app(?string $username = null) {
         $this->i_launch_the_app();
 
         if (!is_null($username)) {
@@ -128,14 +124,15 @@ class behat_app extends behat_app_helper {
      *
      * @When I launch the app :runtime
      * @When I launch the app
-     * @param string $runtime Runtime
+     * @param string $runtime Runtime, deprecated and not used anymore.
      * @throws DriverException Issue with configuration or feature file
      * @throws dml_exception Problem with Moodle setup
      * @throws ExpectationException Problem with resizing window
+     * @deprecated since 5.1 "I launch the app :runtime" is deprecated, use "I launch the app" instead
      */
     public function i_launch_the_app(string $runtime = '') {
         // Go to page and prepare browser for app.
-        $this->prepare_browser(['skiponboarding' => empty($runtime)]);
+        $this->prepare_browser();
     }
 
     /**
@@ -283,11 +280,15 @@ class behat_app extends behat_app_helper {
      * @When I wait for the BigBlueButton room to start
      */
     public function i_wait_bbb_room_to_start() {
-        $windowNames = $this->getSession()->getWindowNames();
+        $windowNames = $this->get_window_names();
 
         $this->getSession()->switchToWindow(array_pop($windowNames));
         $this->spin(function($context) {
-            $joinmodal = $context->getSession()->getPage()->find('css', 'div[role="dialog"][aria-label="How would you like to join the audio?"]');
+            $joinmodal = $context->getSession()->getPage()->find('css', implode(', ', [
+                'div[role="dialog"][aria-label="How would you like to join the audio?"]',
+                'div[role="dialog"][aria-label="There was an issue with your audio devices"]',
+            ]));
+
 
             if ($joinmodal) {
                 return true;
@@ -467,7 +468,7 @@ class behat_app extends behat_app_helper {
     /**
      * Presses standard buttons in the app.
      *
-     * @When /^I press the (back|more menu|page menu|user menu) button in the app$/
+     * @When /^I press the (back|more menu|page context menu|user menu) button in the app$/
      * @param string $button Button type
      * @throws DriverException If the button push doesn't work
      */
@@ -476,7 +477,30 @@ class behat_app extends behat_app_helper {
             $result = $this->runtime_js("pressStandard('$button')");
 
             if ($result !== 'OK') {
-                throw new DriverException('Error pressing standard button - ' . $result);
+                throw new DriverException("Error pressing $button button - $result");
+            }
+
+            return true;
+        });
+
+        $this->wait_for_pending_js();
+    }
+
+    /**
+     * Presses deprecated page menu button in the app.
+     *
+     * @When /^I press the page menu button in the app$/
+     * @throws DriverException If the button push doesn't work
+     * @deprecated since 5.1 Use "I press the page context menu button in the app" instead.
+     */
+    public function i_press_the_page_menu_button_in_the_app() {
+        $button = 'page context menu';
+
+        $this->spin(function() use ($button) {
+            $result = $this->runtime_js("pressStandard('$button')");
+
+            if ($result !== 'OK') {
+                throw new DriverException('Error pressing deprecated page menu button - ' . $result);
             }
 
             return true;
@@ -531,7 +555,7 @@ class behat_app extends behat_app_helper {
     }
 
     /**
-     * Receives push notifications.
+     * Clicks a push notification.
      *
      * @When /^I click a push notification in the app for:$/
      * @param TableNode $data Table data
@@ -548,6 +572,23 @@ class behat_app extends behat_app_helper {
             $data->component = 'mod_forum';
         }
 
+        $customdata = [];
+
+        if (isset($discussion->id, $module->id, $discussion->forum)) {
+            $customdata['discussionid'] = $discussion->id;
+            $customdata['cmid'] = $module->id;
+            $customdata['instance'] = $discussion->forum;
+        }
+
+        if (isset($data->appurl)) {
+            $customdata['appurl'] = $data->appurl;
+            $customdata['appurlopenin'] = $data->appurlopenin ?? null;
+        }
+
+        if (isset($data->extendedtext)) {
+            $customdata['extendedtext'] = $data->extendedtext;
+        }
+
         $notification = json_encode([
             'site' => md5($CFG->behat_wwwroot . $data->username),
             'subject' => $data->subject ?? null,
@@ -559,11 +600,9 @@ class behat_app extends behat_app_helper {
             'courseid' => $discussion->course ?? null,
             'moodlecomponent' => $data->component ?? null,
             'name' => $data->name ?? null,
-            'contexturl' => '',
+            'contexturl' => $data->contexturl ?? '',
             'notif' => 1,
-            'customdata' => isset($discussion->id, $module->id, $discussion->forum)
-                ? ['discussionid' => $discussion->id, 'cmid' => $module->id, 'instance' => $discussion->forum]
-                : null,
+            'customdata' => empty($customdata) ? null : $customdata,
             'additionalData' => isset($data->subject) || isset($data->userfrom)
                 ? ['foreground' => true, 'notId' => 23, 'notif' => 1] : null,
         ]);
@@ -604,6 +643,7 @@ class behat_app extends behat_app_helper {
         $data = $data->getColumnsHash()[0];
         $title = array_keys($data)[0];
         $data = (object) $data;
+        $username = $data->user ?? '';
 
         switch ($title) {
             case 'discussion':
@@ -645,7 +685,7 @@ class behat_app extends behat_app_helper {
                 throw new DriverException('Invalid custom link title - ' . $title);
         }
 
-        $this->open_moodleapp_custom_url($pageurl);
+        $this->open_moodleapp_custom_url($pageurl, '', $username);
     }
 
     /**
@@ -796,45 +836,22 @@ class behat_app extends behat_app_helper {
      * to race conditions.
      *
      * @Then /^I (unselect|select) (".+") in the app$/
-     * @param string $selectedtext Text inidicating if the element should be selected or unselected
+     * @param string $action Text inidicating if the element should be selected or unselected
      * @param string $locator Element locator
      * @throws DriverException If the press doesn't work
      */
-    public function i_select_in_the_app(string $selectedtext, string $locator) {
-        $selected = $selectedtext === 'select' ? 'YES' : 'NO';
+    public function i_select_in_the_app(string $action, string $locator) {
         $locator = $this->parse_element_locator($locator);
 
-        $this->spin(function() use ($selectedtext, $selected, $locator) {
-            // Don't do anything if the item is already in the expected state.
-            $result = $this->runtime_js("isSelected($locator)");
-
-            if ($result === $selected) {
-                return true;
-            }
-
-            // Press element.
-            $result = $this->runtime_js("press($locator)");
+        $this->spin(function() use ($action, $locator) {
+            // Select/unselect element.
+            $result = $this->runtime_js("select($locator, '$action')");
 
             if ($result !== 'OK') {
-                throw new DriverException('Error pressing element - ' . $result);
+                throw new DriverException('Error selecting element - ' . $result);
             }
 
-            // Check that it worked as expected.
-            $this->wait_for_pending_js();
-
-            $result = $this->runtime_js("isSelected($locator)");
-
-            switch ($result) {
-                case 'YES':
-                case 'NO':
-                    if ($result !== $selected) {
-                        throw new ExpectationException("Item wasn't $selectedtext after pressing it", $this->getSession()->getDriver());
-                    }
-
-                    return true;
-                default:
-                    throw new DriverException('Error finding item - ' . $result);
-            }
+            return true;
         });
 
         $this->wait_for_pending_js();
@@ -984,7 +1001,7 @@ class behat_app extends behat_app_helper {
      */
     public function the_app_should_have_opened_a_browser_tab(bool $not = false, ?string $urlpattern = null) {
         $this->spin(function() use ($not, $urlpattern) {
-            $windowNames = $this->getSession()->getWindowNames();
+            $windowNames = $this->get_window_names();
             $openedbrowsertab = count($windowNames) === 2;
 
             if ((!$not && !$openedbrowsertab) || ($not && $openedbrowsertab && is_null($urlpattern))) {
@@ -1091,7 +1108,7 @@ class behat_app extends behat_app_helper {
      * @throws DriverException If there aren't exactly 2 tabs open
      */
     public function i_switch_to_the_browser_tab_opened_by_the_app() {
-        $windowNames = $this->getSession()->getWindowNames();
+        $windowNames = $this->get_window_names();
         if (count($windowNames) !== 2) {
             throw new DriverException('Expected to see 2 tabs open, not ' . count($windowNames));
         }
@@ -1139,7 +1156,7 @@ class behat_app extends behat_app_helper {
      * @throws DriverException If there aren't exactly 2 tabs open
      */
     public function i_close_the_browser_tab_opened_by_the_app() {
-        $names = $this->getSession()->getWindowNames();
+        $names = $this->get_window_names();
         if (count($names) !== 2) {
             throw new DriverException('Expected to see 2 tabs open, not ' . count($names));
         }
@@ -1150,18 +1167,8 @@ class behat_app extends behat_app_helper {
 
         $this->evaluate_script('window.close()');
         $this->getSession()->switchToWindow($names[0]);
-    }
 
-    /**
-     * Switch navigator online mode.
-     *
-     * @Given /^I switch offline mode to "(true|false)"$/
-     * @param string $offline New value for navigator online mode
-     * @throws DriverException If the navigator.online mode is not available
-     * @deprecated since 4.1 use i_switch_network_connection instead.
-     */
-    public function i_switch_offline_mode(string $offline) {
-        $this->i_switch_network_connection($offline == 'true' ? 'offline' : 'wifi');
+        $this->runtime_js("browserTabClosed()");
     }
 
     /**
@@ -1174,15 +1181,16 @@ class behat_app extends behat_app_helper {
     public function i_switch_network_connection(string $mode) {
         switch ($mode) {
             case 'wifi':
-                $this->runtime_js("network.setForceConnectionMode('$mode');");
+                $this->runtime_js("network.setForceConnectionMode('wifi')");
                 break;
             case 'cellular':
-                $this->runtime_js("network.setForceConnectionMode('$mode');");
+                $this->runtime_js("network.setForceConnectionMode('cellular')");
                 break;
             case 'offline':
-                $this->runtime_js("network.setForceConnectionMode('none');");
+                $this->runtime_js("network.setForceConnectionMode('offline')");
                 break;
             default:
+                $this->runtime_js("network.setForceConnectionMode('unknown')");
                 break;
         }
     }
@@ -1196,7 +1204,7 @@ class behat_app extends behat_app_helper {
     public function i_open_a_browser_tab_with_url(string $url) {
         $this->execute_script("window.open('$url', '_system');");
 
-        $windowNames = $this->getSession()->getWindowNames();
+        $windowNames = $this->get_window_names();
         $this->getSession()->switchToWindow($windowNames[1]);
     }
 
@@ -1315,6 +1323,27 @@ class behat_app extends behat_app_helper {
     }
 
     /**
+     * Change language in the app
+     *
+     * @When /^I change language to "(.+)" in the app$/
+     * @param string $language Language code.
+     */
+    public function i_change_language(string $langcode) {
+        $this->spin(function() use ($langcode) {
+            $result = $this->runtime_js("changeLanguage('$langcode')");
+
+            if ($result !== 'OK') {
+                throw new DriverException('Error changing language - ' . $result);
+            }
+
+            return true;
+        });
+
+        // Wait the app to be restarted.
+        $this->prepare_browser();
+    }
+
+    /**
      * Change the viewport size in the browser running the Moodle App.
      *
      * @Given /^I change viewport size to "(?P<width>\d+)x(?P<height>\d+)" in the app$/
@@ -1323,6 +1352,9 @@ class behat_app extends behat_app_helper {
      */
     public function i_change_viewport_size_in_the_app(int $width, int $height) {
         $this->resize_app_window($width, $height);
+
+        // Some Scenarios are failing in CI after changing viewport size. Add a 400ms wait to see if it helps.
+        usleep(400000);
     }
 
     /**
@@ -1332,6 +1364,30 @@ class behat_app extends behat_app_helper {
      */
     public function i_wait_toast_to_dismiss_in_the_app() {
         $this->runtime_js('waitToastDismiss()');
+    }
+
+
+    /**
+     * Override app environment variables.
+     *
+     * @Given /^the environment config is patched with:$/
+     * @param TableNode $data Table data
+     */
+    public function the_environment_config_is_patched_with(TableNode $data) {
+        $overrides = [];
+        foreach ($data->getRows() as $row) {
+            $name = $row[0];
+            $value = json_decode($this->replace_wwwroot($row[1]));
+            $overrides[$name] = $value;
+        }
+
+        $json = json_encode($overrides);
+
+        $result = $this->zone_js("patchEnvironment($json)");
+
+        if ($result !== 'OK') {
+            throw new DriverException('Error patching environment - ' . $result);
+        }
     }
 
 }

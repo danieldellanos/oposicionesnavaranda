@@ -14,15 +14,15 @@
 
 import { Injectable } from '@angular/core';
 
-import { CoreApp } from '@services/app';
+import { CoreAppDB } from '@services/app-db';
 import { CoreNetwork } from '@services/network';
 import { CoreConfig } from '@services/config';
-import { CoreUtils } from '@services/utils/utils';
-import { CoreConstants } from '@/core/constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreConfigSettingKey, CoreTimeConstants } from '@/core/constants';
 import { CoreError } from '@classes/errors/error';
 
 import { makeSingleton, Translate } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { APP_SCHEMA, CRON_TABLE_NAME, CronDBEntry } from '@services/database/cron';
 import { asyncInstance } from '../utils/async-instance';
 import { CoreDatabaseTable } from '@classes/database/database-table';
@@ -34,10 +34,13 @@ import { CoreDatabaseCachingStrategy, CoreDatabaseTableProxy } from '@classes/da
 @Injectable({ providedIn: 'root' })
 export class CoreCronDelegateService {
 
-    // Constants.
-    static readonly DEFAULT_INTERVAL = 3600000; // Default interval is 1 hour.
-    static readonly MIN_INTERVAL = 300000; // Minimum interval is 5 minutes.
-    static readonly MAX_TIME_PROCESS = 120000; // Max time a process can block the queue. Defaults to 2 minutes.
+    static readonly DEFAULT_INTERVAL = CoreTimeConstants.MILLISECONDS_HOUR;
+    static readonly MIN_INTERVAL = CoreTimeConstants.MILLISECONDS_MINUTE * 4;
+
+    /**
+     * Max time a process can block the queue.
+     */
+    static readonly MAX_TIME_PROCESS = CoreTimeConstants.MILLISECONDS_MINUTE * 2;
 
     protected logger: CoreLogger;
     protected handlers: { [s: string]: CoreCronHandler } = {};
@@ -52,15 +55,11 @@ export class CoreCronDelegateService {
      * Initialize database.
      */
     async initializeDatabase(): Promise<void> {
-        try {
-            await CoreApp.createTablesFromSchema(APP_SCHEMA);
-        } catch {
-            // Ignore errors.
-        }
+        await CoreAppDB.createTablesFromSchema(APP_SCHEMA);
 
         const table = new CoreDatabaseTableProxy<CronDBEntry>(
             { cachingStrategy: CoreDatabaseCachingStrategy.Eager },
-            CoreApp.getDB(),
+            CoreAppDB.getDB(),
             CRON_TABLE_NAME,
         );
 
@@ -74,7 +73,7 @@ export class CoreCronDelegateService {
      * If the handler cannot be executed or it fails, it will be re-executed after mmCoreCronMinInterval.
      *
      * @param name Name of the handler.
-     * @param force Wether the execution is forced (manual sync).
+     * @param force Whether the execution is forced (manual sync).
      * @param siteId Site ID. If not defined, all sites.
      * @returns Promise resolved if handler is executed successfully, rejected otherwise.
      */
@@ -84,7 +83,7 @@ export class CoreCronDelegateService {
             this.logger.debug(`Cannot execute cron job because is invalid: ${name}`);
 
             throw new CoreError(
-                Translate.instant('core.errorsomethingwrong') + '<br>' + Translate.instant('core.errorsitesupport'),
+                `${Translate.instant('core.errorsomethingwrong')}<br>${Translate.instant('core.errorsitesupport')}`,
             );
         }
 
@@ -101,7 +100,7 @@ export class CoreCronDelegateService {
 
         if (isSync) {
             // Check network connection.
-            const syncOnlyOnWifi = await CoreConfig.get(CoreConstants.SETTINGS_SYNC_ONLY_ON_WIFI, false);
+            const syncOnlyOnWifi = await CoreConfig.get(CoreConfigSettingKey.SYNC_ONLY_ON_WIFI, false);
 
             if (syncOnlyOnWifi && !CoreNetwork.isWifi()) {
                 // Cannot execute in this network connection, retry soon.
@@ -113,13 +112,13 @@ export class CoreCronDelegateService {
         }
 
         // Add the execution to the queue.
-        this.queuePromise = CoreUtils.ignoreErrors(this.queuePromise).then(async () => {
+        this.queuePromise = CorePromiseUtils.ignoreErrors(this.queuePromise).then(async () => {
             try {
                 await this.executeHandler(name, force, siteId);
 
                 this.logger.debug(`Cron job '${name}' was successfully executed.`);
 
-                await CoreUtils.ignoreErrors(this.setHandlerLastExecutionTime(name, Date.now()));
+                await CorePromiseUtils.ignoreErrors(this.setHandlerLastExecutionTime(name, Date.now()));
 
                 this.scheduleNextExecution(name);
 
@@ -140,18 +139,18 @@ export class CoreCronDelegateService {
      * Run a handler, cancelling the execution if it takes more than MAX_TIME_PROCESS.
      *
      * @param name Name of the handler.
-     * @param force Wether the execution is forced (manual sync).
+     * @param force Whether the execution is forced (manual sync).
      * @param siteId Site ID. If not defined, all sites.
      * @returns Promise resolved when the handler finishes or reaches max time, rejected if it fails.
      */
     protected async executeHandler(name: string, force?: boolean, siteId?: string): Promise<void> {
-        this.logger.debug('Executing handler: ' + name);
+        this.logger.debug(`Executing handler: ${name}`);
 
         try {
             // Wrap the call in Promise.resolve to make sure it's a promise.
             const promise = Promise.resolve(this.handlers[name].execute?.(siteId, force));
 
-            await CoreUtils.timeoutPromise(promise, CoreCronDelegateService.MAX_TIME_PROCESS);
+            await CorePromiseUtils.timeoutPromise(promise, CoreCronDelegateService.MAX_TIME_PROCESS);
         } catch (error) {
             if (error.timeout) {
                 // The handler took too long. Resolve because we don't want to retry soon.
@@ -181,7 +180,7 @@ export class CoreCronDelegateService {
             }
         }
 
-        await CoreUtils.allPromises(promises);
+        await CorePromiseUtils.allPromises(promises);
     }
 
     /**
@@ -237,7 +236,7 @@ export class CoreCronDelegateService {
      * @returns Handler's last execution ID.
      */
     protected getHandlerLastExecutionId(name: string): string {
-        return 'last_execution_' + name;
+        return `last_execution_${name}`;
     }
 
     /**
@@ -377,7 +376,7 @@ export class CoreCronDelegateService {
 
         this.handlers[name].timeout = window.setTimeout(() => {
             delete this.handlers[name].timeout;
-            CoreUtils.ignoreErrors(this.checkAndExecuteHandler(name));
+            CorePromiseUtils.ignoreErrors(this.checkAndExecuteHandler(name));
         }, timeToNextExecution);
     }
 
@@ -482,6 +481,7 @@ export interface CoreCronHandler {
 
     /**
      * Returns handler's interval in milliseconds. Defaults to CoreCronDelegateService.DEFAULT_INTERVAL.
+     * The minumum interval is CoreCronDelegateService.MIN_INTERVAL (4 minutes).
      *
      * @returns Interval time (in milliseconds).
      */

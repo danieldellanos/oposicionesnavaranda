@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Directive, Input, OnInit, ElementRef } from '@angular/core';
-
-import { CoreDomUtils } from '@services/utils/dom';
+import { Directive, Input, OnInit, ElementRef, inject } from '@angular/core';
 import { CoreCourse, CoreCourseModuleContentFile } from '@features/course/services/course';
-import { CoreCourseHelper, CoreCourseModuleData } from '@features/course/services/course-helper';
-import { CoreUtilsOpenFileOptions } from '@services/utils/utils';
-import { CoreLoadings } from '@services/loadings';
+import { CoreCourseModuleData } from '@features/course/services/course-helper';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CoreOpenerOpenFileOptions } from '@static/opener';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { Translate } from '@singletons';
+import { CoreCoursePrefetch } from '../services/course-prefetch';
 
 /**
  * Directive to allow downloading and open the main file of a module.
@@ -38,13 +39,9 @@ export class CoreCourseDownloadModuleMainFileDirective implements OnInit {
     @Input() component?: string; // Component to link the file to.
     @Input() componentId?: string | number; // Component ID to use in conjunction with the component. If not defined, use moduleId.
     @Input() files?: CoreCourseModuleContentFile[]; // List of files of the module. If not provided, use module.contents.
-    @Input() options?: CoreUtilsOpenFileOptions = {};
+    @Input() options?: CoreOpenerOpenFileOptions = {};
 
-    protected element: HTMLElement;
-
-    constructor(element: ElementRef) {
-        this.element = element.nativeElement;
-    }
+    protected element: HTMLElement = inject(ElementRef).nativeElement;
 
     /**
      * @inheritdoc
@@ -73,7 +70,7 @@ export class CoreCourseDownloadModuleMainFileDirective implements OnInit {
 
                 const componentId = this.componentId ? Number(this.componentId) : this.module.id;
 
-                await CoreCourseHelper.downloadModuleAndOpenFile(
+                await CoreCoursePrefetch.downloadModuleAndOpenFile(
                     this.module,
                     courseId ?? this.module.course,
                     this.component,
@@ -83,7 +80,7 @@ export class CoreCourseDownloadModuleMainFileDirective implements OnInit {
                     this.options,
                 );
             } catch (error) {
-                CoreDomUtils.showErrorModalDefault(error, 'core.errordownloading', true);
+                CoreAlerts.showError(error, { default: Translate.instant('core.errordownloading') });
             } finally {
                 modal.dismiss();
             }

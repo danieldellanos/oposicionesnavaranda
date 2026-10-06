@@ -14,12 +14,11 @@
 
 import { Injectable, Type } from '@angular/core';
 
-import { AuthEmailSignupProfileField } from '@features/login/services/login-helper';
+import { AuthEmailSignupProfileField } from '@features/login/services/signup';
 import { CoreUserProfileField } from '@features/user/services/user';
 import { CoreUserProfileFieldHandler, CoreUserProfileFieldHandlerData } from '@features/user/services/user-profile-field-delegate';
-import { CoreFormFields } from '@singletons/form';
+import { CoreFormFields } from '@static/form';
 import { makeSingleton } from '@singletons';
-import { AddonUserProfileFieldCheckboxComponent } from '../../component/checkbox';
 
 /**
  * Checkbox user profile field handlers.
@@ -31,22 +30,14 @@ export class AddonUserProfileFieldCheckboxHandlerService implements CoreUserProf
     type = 'checkbox';
 
     /**
-     * Whether or not the handler is enabled on a site level.
-     *
-     * @returns Promise resolved with true if enabled.
+     * @inheritdoc
      */
     async isEnabled(): Promise<boolean> {
         return true;
     }
 
     /**
-     * Get the data to send for the field based on the input data.
-     *
-     * @param field User field to get the data for.
-     * @param signup True if user is in signup page.
-     * @param registerAuth Register auth method. E.g. 'email'.
-     * @param formValues Form Values.
-     * @returns Data to send for the field.
+     * @inheritdoc
      */
     async getData(
         field: AuthEmailSignupProfileField | CoreUserProfileField,
@@ -54,7 +45,7 @@ export class AddonUserProfileFieldCheckboxHandlerService implements CoreUserProf
         registerAuth: string,
         formValues: CoreFormFields,
     ): Promise<CoreUserProfileFieldHandlerData | undefined> {
-        const name = 'profile_field_' + field.shortname;
+        const name = `profile_field_${field.shortname}`;
 
         if (formValues[name] !== undefined) {
             return {
@@ -66,12 +57,11 @@ export class AddonUserProfileFieldCheckboxHandlerService implements CoreUserProf
     }
 
     /**
-     * Return the Component to use to display the user profile field.
-     * It's recommended to return the class of the component, but you can also return an instance of the component.
-     *
-     * @returns The component (or promise resolved with component) to use, undefined if not found.
+     * @inheritdoc
      */
-    getComponent(): Type<unknown> | Promise<Type<unknown>> {
+    async getComponent(): Promise<Type<unknown>> {
+        const { AddonUserProfileFieldCheckboxComponent } = await import('../../component/checkbox');
+
         return AddonUserProfileFieldCheckboxComponent;
     }
 

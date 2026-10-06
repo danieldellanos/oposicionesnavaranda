@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'jest-preset-angular/setup-jest';
+import { setupZoneTestEnv } from 'jest-preset-angular/setup-env/zone';
 
 import { setCreateSingletonMethodProxy, setSingletonsInjector } from '@singletons';
 
 import { resetTestingEnvironment, getServiceInstance } from './utils';
+import { Type, AbstractType, InjectionToken } from '@angular/core';
+
+setupZoneTestEnv();
 
 // eslint-disable-next-line no-console
 console.debug = () => {
@@ -41,5 +44,6 @@ setCreateSingletonMethodProxy(
             jest.fn((...args) => method.call(instance, ...args)),
 );
 
-setSingletonsInjector({ get: injectionToken => getServiceInstance(injectionToken) });
+setSingletonsInjector({ get: (injectionToken: Type<unknown> | AbstractType<unknown> | InjectionToken<unknown>) =>
+    getServiceInstance(injectionToken) });
 beforeEach(() => resetTestingEnvironment());

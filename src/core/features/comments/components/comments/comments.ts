@@ -13,16 +13,15 @@
 // limitations under the License.
 
 import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChange, OnInit } from '@angular/core';
-import {
-    CoreComments,
-    CoreCommentsProvider,
-} from '../../services/comments';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { CoreComments } from '../../services/comments';
+import { CORE_COMMENTS_COUNT_CHANGED_EVENT, CORE_COMMENTS_REFRESH_EVENT } from '@features/comments/constants';
+import { CoreEventObserver, CoreEvents } from '@static/events';
 import { CoreSites } from '@services/sites';
 import { CoreNavigator } from '@services/navigator';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { ContextLevel } from '@/core/constants';
 import { toBoolean } from '@/core/transforms/boolean';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Component that displays the count of comments.
@@ -31,6 +30,9 @@ import { toBoolean } from '@/core/transforms/boolean';
     selector: 'core-comments',
     templateUrl: 'core-comments.html',
     styleUrl: 'comments.scss',
+    imports: [
+        CoreSharedModule,
+    ],
 })
 export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestroy {
 
@@ -69,14 +71,14 @@ export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestr
 
         // Refresh comments if event received.
         this.refreshCommentsObserver = CoreEvents.on(
-            CoreCommentsProvider.REFRESH_COMMENTS_EVENT,
+            CORE_COMMENTS_REFRESH_EVENT,
             (data) => {
                 // Verify these comments need to be updated.
                 if (this.undefinedOrEqual(data, 'contextLevel') && this.undefinedOrEqual(data, 'instanceId') &&
                     this.undefinedOrEqual(data, 'component') && this.undefinedOrEqual(data, 'itemId') &&
                     this.undefinedOrEqual(data, 'area')) {
 
-                    CoreUtils.ignoreErrors(this.doRefresh());
+                    CorePromiseUtils.ignoreErrors(this.doRefresh());
                 }
             },
             CoreSites.getCurrentSiteId(),
@@ -84,7 +86,7 @@ export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestr
 
         // Refresh comments count if event received.
         this.commentsCountObserver = CoreEvents.on(
-            CoreCommentsProvider.COMMENTS_COUNT_CHANGED_EVENT,
+            CORE_COMMENTS_COUNT_CHANGED_EVENT,
             (data) => {
                 // Verify these comments need to be updated.
                 if (!this.commentsCount.endsWith('+') && this.undefinedOrEqual(data, 'contextLevel') &&
@@ -94,7 +96,7 @@ export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestr
                     newNumber = newNumber >= 0 ? newNumber : 0;
 
                     // Parse and unparse string.
-                    this.commentsCount = newNumber + '';
+                    this.commentsCount = `${newNumber}`;
                 }
             },
             CoreSites.getCurrentSiteId(),
@@ -170,6 +172,8 @@ export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestr
 
     /**
      * Opens the comments page.
+     *
+     * @param e Event that triggered the action (optional).
      */
     openComments(e?: Event): void {
         e?.preventDefault();
@@ -180,7 +184,7 @@ export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestr
         }
 
         CoreNavigator.navigateToSitePath(
-            'comments/' + this.contextLevel + '/' + this.instanceId + '/' + this.component + '/' + this.itemId + '/',
+            `comments/${this.contextLevel}/${this.instanceId}/${this.component}/${this.itemId}/`,
             {
                 params: {
                     area: this.area,
@@ -208,7 +212,7 @@ export class CoreCommentsCommentsComponent implements OnInit, OnChanges, OnDestr
      * @returns Whether it's undefined or equal.
      */
     protected undefinedOrEqual(data: Record<string, unknown>, name: string): boolean {
-        return data[name] === undefined || data[name] == this[name];
+        return data[name] === undefined || data[name] === this[name];
     }
 
 }

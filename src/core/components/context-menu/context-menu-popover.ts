@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreConstants } from '@/core/constants';
-import { Component } from '@angular/core';
-import { NavParams } from '@ionic/angular';
+import { LOADING_ICON } from '@/core/constants';
+import { Component, input } from '@angular/core';
 import { PopoverController } from '@singletons';
 import { CoreContextMenuItemComponent } from './context-menu-item';
-import { CoreSharedModule } from '@/core/shared.module';
+import { CoreBaseModule } from '@/core/base.module';
+import { CoreFaIconDirective } from '@directives/fa-icon';
+import { CoreLinkDirective } from '@directives/link';
 
 /**
  * Component to display a list of items received by param in a popover.
@@ -26,25 +27,20 @@ import { CoreSharedModule } from '@/core/shared.module';
     selector: 'core-context-menu-popover',
     templateUrl: 'core-context-menu-popover.html',
     styleUrl: 'context-menu-popover.scss',
-    standalone: true,
     imports: [
-        CoreSharedModule,
+        CoreBaseModule,
+        CoreFaIconDirective,
+        CoreLinkDirective,
     ],
 })
 export class CoreContextMenuPopoverComponent {
 
-    uniqueId: string;
-    items: CoreContextMenuItemComponent[];
-
-    constructor(
-        navParams: NavParams,
-    ) {
-        this.items = navParams.get('items') || [];
-        this.uniqueId = navParams.get('id');
-    }
+    readonly items = input<CoreContextMenuItemComponent[]>([]);
 
     /**
      * Close the popover.
+     *
+     * @param item Item that triggered the close. It will be passed to onClosed output of the item, if set.
      */
     closeMenu(item?: CoreContextMenuItemComponent): void {
         PopoverController.dismiss(item);
@@ -58,26 +54,26 @@ export class CoreContextMenuPopoverComponent {
      * @returns Return true if success, false if error.
      */
     itemClicked(event: Event, item: CoreContextMenuItemComponent): boolean {
-        if (item.iconAction == 'toggle' && !event.defaultPrevented) {
+        if (item.iconAction() === 'toggle' && !event.defaultPrevented) {
             event.preventDefault();
             event.stopPropagation();
-            item.toggle = !item.toggle;
+            item.toggle.set(!item.toggle());
         }
 
-        if (!!item.action && item.action.observed) {
+        if (item.actionEmitter.observed) {
             event.preventDefault();
             event.stopPropagation();
 
-            if (item.iconAction == CoreConstants.ICON_LOADING) {
+            if (item.iconAction() === LOADING_ICON) {
                 return false;
             }
 
-            if (item.closeOnClick) {
+            if (item.closeOnClick()) {
                 this.closeMenu(item);
             }
 
-            item.action.emit(() => this.closeMenu(item));
-        } else if (item.closeOnClick && (item.href || (!!item.onClosed && item.onClosed.observed))) {
+            item.actionEmitter.next(() => this.closeMenu(item));
+        } else if (item.closeOnClick() && (item.effectiveHref() || (!!item.onClosed && item.onClosedEmitter.observed))) {
             this.closeMenu(item);
         }
 

@@ -16,6 +16,7 @@ import { Injectable } from '@angular/core';
 import { CoreSettingsHandler, CoreSettingsHandlerData } from '@features/settings/services/settings-delegate';
 import { makeSingleton } from '@singletons';
 import { AddonMessages } from '../messages';
+import { ADDON_MESSAGES_SETTINGS_PAGE_NAME, ADDONS_MESSAGES_COMPONENT_NAME } from '@addons/messages/constants';
 
 /**
  * Message settings handler.
@@ -23,9 +24,7 @@ import { AddonMessages } from '../messages';
 @Injectable({ providedIn: 'root' })
 export class AddonMessagesSettingsHandlerService implements CoreSettingsHandler {
 
-    static readonly PAGE_NAME = 'messages';
-
-    name = 'AddonMessages';
+    name = ADDONS_MESSAGES_COMPONENT_NAME;
     priority = 600;
 
     /**
@@ -46,7 +45,7 @@ export class AddonMessagesSettingsHandlerService implements CoreSettingsHandler 
         return {
             icon: 'fas-comments',
             title: 'addon.messages.messages',
-            page: AddonMessagesSettingsHandlerService.PAGE_NAME,
+            page: ADDON_MESSAGES_SETTINGS_PAGE_NAME,
             class: 'addon-messages-settings-handler',
         };
     }

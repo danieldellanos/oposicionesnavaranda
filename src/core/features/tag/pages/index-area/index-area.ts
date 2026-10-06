@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnInit, Type } from '@angular/core';
-import { CoreDomUtils } from '@services/utils/dom';
+import { Component, OnInit, Type, inject, OnDestroy } from '@angular/core';
 import { CoreTag } from '@features/tag/services/tag';
 import { ActivatedRoute } from '@angular/router';
 import { CoreTagAreaDelegate } from '../../services/tag-area-delegate';
 import { Translate } from '@singletons';
 import { CoreNavigator } from '@services/navigator';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
+import { Subscription } from 'rxjs';
 
 /**
  * Page that displays the tag index area.
@@ -26,8 +28,11 @@ import { CoreNavigator } from '@services/navigator';
 @Component({
     selector: 'page-core-tag-index-area',
     templateUrl: 'index-area.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class CoreTagIndexAreaPage implements OnInit {
+export default class CoreTagIndexAreaPage implements OnInit, OnDestroy {
 
     tagId = 0;
     tagName = '';
@@ -47,16 +52,16 @@ export class CoreTagIndexAreaPage implements OnInit {
     areaComponent?: Type<unknown>;
     loadMoreError = false;
 
-    constructor(
-        protected route: ActivatedRoute,
-    ) { }
+    protected routeSubscription?: Subscription;
+    protected route = inject(ActivatedRoute);
 
     /**
      * @inheritdoc
      */
     async ngOnInit(): Promise<void> {
-        this.route.queryParams.subscribe(async () => {
+        this.routeSubscription = this.route.queryParams.subscribe(async () => {
             this.loaded = false;
+            this.areaComponent = undefined; // Re-calculate area component.
 
             this.tagId = CoreNavigator.getRouteNumberParam('tagId') || this.tagId;
             this.tagName = CoreNavigator.getRouteParam('tagName') || this.tagName;
@@ -75,13 +80,15 @@ export class CoreTagIndexAreaPage implements OnInit {
             this.canLoadMore = CoreNavigator.getRouteBooleanParam('canLoadMore') || false;
 
             try {
-                if (!this.componentName || !this.itemType || !this.items.length || this.nextPage == 0) {
+                if (!this.componentName || !this.itemType || !this.items.length || this.nextPage === 0) {
                     await this.fetchData(true);
                 }
 
                 if (this.componentName && this.itemType) {
                     this.areaComponent = await CoreTagAreaDelegate.getComponent(this.componentName, this.itemType);
                 }
+            } catch {
+                // Ignore errors, they are handled in fetchData.
             } finally {
                 this.loaded = true;
             }
@@ -92,9 +99,8 @@ export class CoreTagIndexAreaPage implements OnInit {
      * Fetch next page of the tag index area.
      *
      * @param refresh Whether to refresh the data or fetch a new page.
-     * @returns Resolved when done.
      */
-    async fetchData(refresh: boolean = false): Promise<void> {
+    async fetchData(refresh = false): Promise<void> {
         this.loadMoreError = false;
         const page = refresh ? 0 : this.nextPage;
 
@@ -117,7 +123,7 @@ export class CoreTagIndexAreaPage implements OnInit {
                 throw Translate.instant('core.tag.errorareanotsupported');
             }
 
-            if (page == 0) {
+            if (page === 0) {
                 this.items = items;
             } else {
                 this.items.push(...items);
@@ -129,7 +135,7 @@ export class CoreTagIndexAreaPage implements OnInit {
             this.nextPage = page + 1;
         } catch (error) {
             this.loadMoreError = true; // Set to prevent infinite calls with infinite-loading.
-            CoreDomUtils.showErrorModalDefault(error, 'Error loading tag index');
+            CoreAlerts.showError(error, { default: 'Error loading tag index' });
         }
     }
 
@@ -170,6 +176,13 @@ export class CoreTagIndexAreaPage implements OnInit {
                 refresher?.complete();
             }
         }
+    }
+
+    /**
+     * @inheritdoc
+     */
+    ngOnDestroy(): void {
+        this.routeSubscription?.unsubscribe();
     }
 
 }

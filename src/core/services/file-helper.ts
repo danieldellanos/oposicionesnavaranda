@@ -17,22 +17,23 @@ import { FileEntry } from '@awesome-cordova-plugins/file/ngx';
 
 import { CoreNetwork } from '@services/network';
 import { CoreFile } from '@services/file';
+import { CoreFileUtils } from '@static/file-utils';
 import { CoreFilepool } from '@services/filepool';
 import { CoreSites } from '@services/sites';
 import { CoreWS, CoreWSFile } from '@services/ws';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreUrl } from '@singletons/url';
-import { CoreUtils, CoreUtilsOpenFileOptions, OpenFileAction } from '@services/utils/utils';
+import { CoreUrl } from '@static/url';
+import { CoreOpener, CoreOpenerOpenFileOptions, OpenFileAction } from '@static/opener';
 import { CoreConstants, DownloadStatus } from '@/core/constants';
 import { CoreError } from '@classes/errors/error';
 import { makeSingleton, Translate } from '@singletons';
 import { CoreNetworkError } from '@classes/errors/network-error';
 import { CoreConfig } from './config';
 import { CoreCanceledError } from '@classes/errors/cancelederror';
-import { CoreMimetypeUtils } from '@services/utils/mimetype';
+import { CoreMimetype } from '@static/mimetype';
 import { CorePlatform } from './platform';
-import { CorePath } from '@singletons/path';
-import { CoreText } from '@singletons/text';
+import { CorePath } from '@static/path';
+import { CoreText } from '@static/text';
+import { CorePrompts } from './overlays/prompts';
 
 /**
  * Provider to provide some helper functions regarding files and packages.
@@ -68,7 +69,7 @@ export class CoreFileHelperProvider {
         state?: DownloadStatus,
         onProgress?: CoreFileHelperOnProgress,
         siteId?: string,
-        options: CoreUtilsOpenFileOptions = {},
+        options: CoreOpenerOpenFileOptions = {},
     ): Promise<void> {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
@@ -98,18 +99,14 @@ export class CoreFileHelperProvider {
         if (!CoreUrl.isLocalFileUrl(url)) {
             /* In iOS, if we use the same URL in embedded browser and background download then the download only
                downloads a few bytes (cached ones). Add a hash to the URL so both URLs are different. */
-            url = url + '#moodlemobile-embedded';
+            url = `${url}#moodlemobile-embedded`;
 
             try {
-                await CoreUtils.openOnlineFile(url);
+                await CoreOpener.openOnlineFile(url);
 
                 return;
-            } catch (error) {
+            } catch {
                 // Error opening the file, some apps don't allow opening online files.
-                if (!CoreFile.isAvailable()) {
-                    throw error;
-                }
-
                 // Get the state.
                 if (!state) {
                     state = await CoreFilepool.getFileStateByUrl(siteId, fileUrl, timemodified);
@@ -129,7 +126,7 @@ export class CoreFileHelperProvider {
             }
         }
 
-        return CoreUtils.openFile(url, options);
+        return CoreOpener.openFile(url, options);
     }
 
     /**
@@ -155,17 +152,12 @@ export class CoreFileHelperProvider {
         state?: DownloadStatus,
         onProgress?: CoreFileHelperOnProgress,
         siteId?: string,
-        options: CoreUtilsOpenFileOptions = {},
+        options: CoreOpenerOpenFileOptions = {},
     ): Promise<string> {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
         const site = await CoreSites.getSite(siteId);
         const fixedUrl = await site.checkAndFixPluginfileURL(fileUrl);
-
-        if (!CoreFile.isAvailable()) {
-            // Use the online URL.
-            return fixedUrl;
-        }
 
         if (!state) {
             // Calculate the state.
@@ -325,7 +317,7 @@ export class CoreFileHelperProvider {
 
         if (!('isexternalfile' in file) || !file.isexternalfile) {
             return mimetype === 'application/vnd.android.package-archive'
-                || CoreMimetypeUtils.getFileExtension(file.filename ?? '') === 'apk';
+                || CoreMimetype.getFileExtension(file.filename ?? '') === 'apk';
         }
 
         if (mimetype.indexOf('application/vnd.google-apps.') != -1) {
@@ -381,7 +373,7 @@ export class CoreFileHelperProvider {
                 const fileObject = await CoreFile.getFileObjectFromFileEntry(fileEntry);
 
                 return fileObject.size;
-            } catch (error) {
+            } catch {
                 // Error getting the file, maybe it's not downloaded. Get remote size.
                 const size = await CoreWS.getRemoteFileSize(fileUrl);
 
@@ -407,9 +399,11 @@ export class CoreFileHelperProvider {
      * Is the file openable in app.
      *
      * @param file The file to check.
+     * @param file.filename The file's filename field.
+     * @param file.name The file's name field.
      * @returns bool.
      */
-    isOpenableInApp(file: {filename?: string; name?: string}): boolean {
+    isOpenableInApp(file: { filename?: string; name?: string }): boolean {
         const regex = /(?:\.([^.]+))?$/;
         const regexResult = regex.exec(file.filename || file.name || '');
 
@@ -426,33 +420,32 @@ export class CoreFileHelperProvider {
      *
      * @param onlyDownload Whether the user is only downloading the file, not opening it.
      * @param file The file that will be opened.
+     * @param file.filename The file's filename field.
+     * @param file.name The file's name field.
      * @returns Promise resolved if confirmed, rejected otherwise.
      */
-    async showConfirmOpenUnsupportedFile(onlyDownload = false, file: {filename?: string; name?: string}): Promise<void> {
+    async showConfirmOpenUnsupportedFile(onlyDownload = false, file: { filename?: string; name?: string }): Promise<void> {
         file = file || {}; // Just in case some plugin doesn't pass it. This can be removed in the future, @since app 4.1.
 
         // Check if the user decided not to see the warning.
         const regex = /(?:\.([^.]+))?$/;
         const regexResult = regex.exec(file.filename || file.name || '');
 
-        const configKey = 'CoreFileUnsupportedWarningDisabled-' + (regexResult?.[1] ?? 'unknown');
+        const configKey = `CoreFileUnsupportedWarningDisabled-${regexResult?.[1] ?? 'unknown'}`;
         const dontShowWarning = await CoreConfig.get(configKey, 0);
         if (dontShowWarning) {
             return;
         }
 
-        const message = Translate.instant('core.cannotopeninapp' + (onlyDownload ? 'download' : ''));
+        const message = Translate.instant(`core.cannotopeninapp${onlyDownload ? 'download' : ''}`);
         const okButton = Translate.instant(onlyDownload ? 'core.downloadfile' : 'core.openfile');
 
         try {
-            const dontShowAgain = await CoreDomUtils.showPrompt(
-                message,
-                undefined,
-                Translate.instant('core.dontshowagain'),
-                'checkbox',
-                { okText: okButton },
-                { cssClass: 'core-alert-force-on-top' },
-            );
+            const dontShowAgain = await CorePrompts.show(message, 'checkbox', {
+                placeholderOrLabel: Translate.instant('core.dontshowagain'),
+                buttons: { okText: okButton },
+                cssClass: 'core-alert-force-on-top',
+            });
 
             if (dontShowAgain) {
                 CoreConfig.set(configKey, 1);
@@ -477,7 +470,7 @@ export class CoreFileHelperProvider {
             return false;
         }
 
-        const regEx = new RegExp('(,|^)' + fileType + '(,|$)', 'g');
+        const regEx = new RegExp(`(,|^)${fileType}(,|$)`, 'g');
 
         return !!fileTypeExcludeList.match(regEx);
     }
@@ -489,7 +482,7 @@ export class CoreFileHelperProvider {
      * @returns The file name.
      */
     getFilenameFromPath(file: CoreFileEntry): string | undefined {
-        const path = CoreUtils.isFileEntry(file) ? file.fullPath : file.filepath;
+        const path = CoreFileUtils.isFileEntry(file) ? file.fullPath : file.filepath;
 
         if (path === undefined || path.length == 0) {
             return;
@@ -527,21 +520,21 @@ export class CoreFileHelperProvider {
         siteUrl: string,
         text: string,
         files: CoreWSFile[],
-    ): { text: string; replaceMap?: {[url: string]: string} } {
+    ): { text: string; replaceMap?: { [url: string]: string } } {
 
         if (!text || !files || !files.length) {
             return { text };
         }
 
         const draftfileUrl = CorePath.concatenatePaths(siteUrl, 'draftfile.php');
-        const matches = text.match(new RegExp(CoreText.escapeForRegex(draftfileUrl) + '[^\'" ]+', 'ig'));
+        const matches = text.match(new RegExp(`${CoreText.escapeForRegex(draftfileUrl)}[^'" ]+`, 'ig'));
 
         if (!matches || !matches.length) {
             return { text };
         }
 
         // Index the pluginfile URLs by file name.
-        const pluginfileMap: {[name: string]: string} = {};
+        const pluginfileMap: { [name: string]: string } = {};
         files.forEach((file) => {
             if (!file.filename) {
                 return;
@@ -550,7 +543,7 @@ export class CoreFileHelperProvider {
         });
 
         // Replace each draftfile with the corresponding pluginfile URL.
-        const replaceMap: {[url: string]: string} = {};
+        const replaceMap: { [url: string]: string } = {};
         matches.forEach((url) => {
             if (replaceMap[url]) {
                 // URL already treated, same file embedded more than once.
@@ -609,7 +602,7 @@ export class CoreFileHelperProvider {
         }
 
         const draftfileUrl = CorePath.concatenatePaths(siteUrl, 'draftfile.php');
-        const draftfileUrlRegexPrefix = CoreText.escapeForRegex(draftfileUrl) + '/[^/]+/[^/]+/[^/]+/[^/]+/';
+        const draftfileUrlRegexPrefix = `${CoreText.escapeForRegex(draftfileUrl)}/[^/]+/[^/]+/[^/]+/[^/]+/`;
 
         files.forEach((file) => {
             // Get the file name from the URL instead of using file.filename because the URL can have encoded characters.
@@ -622,7 +615,7 @@ export class CoreFileHelperProvider {
 
             // Search the draftfile URL in the original text.
             const matches = originalText.match(
-                new RegExp(draftfileUrlRegexPrefix + CoreText.escapeForRegex(filename) + '[^\'" ]*', 'i'),
+                new RegExp(`${draftfileUrlRegexPrefix + CoreText.escapeForRegex(filename)}[^'" ]*`, 'i'),
             );
 
             if (!matches || !matches[0]) {
@@ -643,7 +636,7 @@ export class CoreFileHelperProvider {
      * @returns Treated text.
      */
     restorePluginfileUrls(text: string, files: CoreWSFile[]): string {
-        if (text && typeof text == 'string') {
+        if (text && typeof text === 'string') {
             const fileURL = this.getTextPluginfileUrl(files);
             if (fileURL) {
                 return text.replace(new RegExp(CoreText.escapeForRegex(fileURL), 'g'), '@@PLUGINFILE@@');

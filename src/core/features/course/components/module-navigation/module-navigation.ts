@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, ElementRef, Input, OnDestroy, OnInit } from '@angular/core';
-import { CoreCourse, CoreCourseWSSection } from '@features/course/services/course';
-import { CoreCourseHelper, CoreCourseModuleData } from '@features/course/services/course-helper';
-import { CoreCourseModuleDelegate } from '@features/course/services/module-delegate';
-import { IonContent } from '@ionic/angular';
-import { CoreLoadings } from '@services/loadings';
-import { CoreNavigationOptions, CoreNavigator } from '@services/navigator';
-import { CoreSites, CoreSitesReadingStrategy } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreUtils } from '@services/utils/utils';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { Component, OnDestroy, OnInit, input, signal } from '@angular/core';
+import { CoreCourseModuleData } from '@features/course/services/course-helper';
+import { CoreSites, CoreSitesCommonWSOptions, CoreSitesReadingStrategy } from '@services/sites';
+import { CoreEventObserver, CoreEvents } from '@static/events';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreCourseNavigation, CoreCourseNavigationDirection } from '@features/course/services/course-navigation';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { Translate } from '@singletons';
+import { CorePromiseUtils } from '@static/promise-utils';
 
 /**
  * Component to show a button to go to the next resource/activity.
@@ -33,31 +32,38 @@ import { CoreEventObserver, CoreEvents } from '@singletons/events';
 @Component({
     selector: 'core-course-module-navigation',
     templateUrl: 'core-course-module-navigation.html',
-    styleUrls: ['module-navigation.scss'],
+    styleUrl: 'module-navigation.scss',
+    imports: [
+        CoreSharedModule,
+    ],
+    host: {
+        '[class.empty]': '(!nextModule() && !previousModule())',
+    },
 })
 export class CoreCourseModuleNavigationComponent implements OnInit, OnDestroy {
 
-    @Input({ required: true }) courseId!: number; // Course ID.
-    @Input({ required: true }) currentModuleId!: number; // Current module Id.
+    readonly courseId = input.required<number>(); // Course ID.
+    readonly currentModuleId = input.required<number>(); // Current module Id.
 
-    nextModule?: CoreCourseModuleData;
-    previousModule?: CoreCourseModuleData;
-    loaded = false;
-    element: HTMLElement;
+    readonly nextModule = signal<CoreCourseModuleData | undefined>(undefined);
+    readonly previousModule = signal<CoreCourseModuleData | undefined>(undefined);
+    readonly loaded = signal(false);
 
     protected completionObserver: CoreEventObserver;
 
-    constructor(protected ionContent: IonContent, element: ElementRef) {
+    constructor() {
         const siteId = CoreSites.getCurrentSiteId();
-        this.element = element.nativeElement;
 
         this.completionObserver = CoreEvents.on(CoreEvents.COMPLETION_MODULE_VIEWED, async (data) => {
-            if (data && data.courseId == this.courseId) {
+            if (data?.courseId === this.courseId()) {
                 // Check if now there's a next module.
                 await this.setNextAndPreviousModules(
-                    CoreSitesReadingStrategy.PREFER_NETWORK,
-                    !this.nextModule,
-                    !this.previousModule,
+                    !this.nextModule(),
+                    !this.previousModule(),
+                    {
+                        readingStrategy: CoreSitesReadingStrategy.PREFER_NETWORK,
+                        siteId,
+                    },
                 );
             }
         }, siteId);
@@ -68,136 +74,89 @@ export class CoreCourseModuleNavigationComponent implements OnInit, OnDestroy {
      */
     async ngOnInit(): Promise<void> {
         try {
-            await this.setNextAndPreviousModules(CoreSitesReadingStrategy.PREFER_CACHE);
+            await this.setNextAndPreviousModules(true, true, { readingStrategy: CoreSitesReadingStrategy.PREFER_CACHE });
         } finally {
-            this.loaded = true;
+            this.loaded.set(true);
         }
     }
 
     /**
      * @inheritdoc
      */
-    async ngOnDestroy(): Promise<void> {
+    ngOnDestroy(): void {
         this.completionObserver.off();
     }
 
     /**
      * Set previous and next modules.
      *
-     * @param readingStrategy Reading strategy.
      * @param checkNext Check next module.
      * @param checkPrevious Check previous module.
-     * @returns Promise resolved when done.
+     * @param options Options to get the sections.
      */
     protected async setNextAndPreviousModules(
-        readingStrategy: CoreSitesReadingStrategy,
         checkNext = true,
         checkPrevious = true,
+        options: CoreSitesCommonWSOptions = {},
     ): Promise<void> {
-        if (!checkNext && !checkPrevious) {
-            return;
-        }
+        const modules = await CoreCourseNavigation.getNextAndPreviousModules(
+            this.courseId(),
+            this.currentModuleId(),
+            checkNext,
+            checkPrevious,
+            options,
+        );
 
-        const preSets = CoreSites.getReadingStrategyPreSets(readingStrategy);
-
-        const sections = await CoreCourse.getSections(this.courseId, false, true, preSets);
-
-        const modules = await CoreCourse.getSectionsModules(sections, {
-            ignoreSection: (section) => !this.isSectionAvailable(section),
-        });
-
-        const currentModuleIndex = modules.findIndex((module) => module.id === this.currentModuleId);
-        if (currentModuleIndex < 0) {
-            // Current module found. Return.
+        if (!modules) {
             return;
         }
 
         if (checkNext) {
-            // Find next Module.
-            this.nextModule = undefined;
-            for (let i = currentModuleIndex + 1; i < modules.length && this.nextModule === undefined; i++) {
-                const module = modules[i];
-                if (this.isModuleAvailable(module)) {
-                    this.nextModule = module;
-                }
-            }
+            this.nextModule.set(modules.nextModule);
         }
-
         if (checkPrevious) {
-            // Find previous Module.
-            this.previousModule = undefined;
-            for (let i = currentModuleIndex - 1; i >= 0 && this.previousModule === undefined; i--) {
-                const module = modules[i];
-                if (this.isModuleAvailable(module)) {
-                    this.previousModule = module;
-                }
-            }
+            this.previousModule.set(modules.previousModule);
         }
-
-        this.element.classList.toggle('empty', !this.nextModule && !this.previousModule);
-    }
-
-    /**
-     * Module is visible by the user and it has a specific view (e.g. not a label).
-     *
-     * @param module Module to check.
-     * @returns Wether the module is available to the user or not.
-     */
-    protected isModuleAvailable(module: CoreCourseModuleData): boolean {
-        return !CoreCourseHelper.isModuleStealth(module) && CoreCourse.moduleHasView(module);
-    }
-
-    /**
-     * Section is visible by the user and its not stealth
-     *
-     * @param section Section to check.
-     * @returns Wether the module is available to the user or not.
-     */
-    protected isSectionAvailable(section: CoreCourseWSSection): boolean {
-        return CoreCourseHelper.canUserViewSection(section) && !CoreCourseHelper.isSectionStealth(section);
     }
 
     /**
      * Go to next/previous module.
      *
-     * @returns Promise resolved when done.
+     * @param next True to go to next module, false to go to previous.
      */
     async goToActivity(next = true): Promise<void> {
-        if (!this.loaded) {
+        if (!this.loaded()) {
             return;
         }
 
         const modal = await CoreLoadings.show();
+        const direction = next ? CoreCourseNavigationDirection.NEXT : CoreCourseNavigationDirection.PREVIOUS;
 
-        // Re-calculate module in case a new module was made visible.
-        await CoreUtils.ignoreErrors(this.setNextAndPreviousModules(CoreSitesReadingStrategy.PREFER_NETWORK, next, !next));
+        let moduleToOpen = await CorePromiseUtils.ignoreErrors(CoreCourseNavigation.getNextOrPreviousModules(
+            this.courseId(),
+            this.currentModuleId(),
+            direction,
+            {
+                readingStrategy: CoreSitesReadingStrategy.PREFER_NETWORK,
+            },
+        ));
 
         modal.dismiss();
 
-        const module = next ? this.nextModule : this.previousModule;
-        if (!module) {
-            // It seems the module was hidden. Show a message.
-            CoreDomUtils.instance.showErrorModal(
-                next ? 'core.course.nextactivitynotfound' : 'core.course.previousactivitynotfound',
-                true,
-            );
+        if (!moduleToOpen) {
+            moduleToOpen = next ? this.nextModule() : this.previousModule();
 
-            return;
+            if (!moduleToOpen) {
+                // It seems the module was hidden. Show a message.
+                CoreAlerts.showError(
+                    Translate.instant(next ? 'core.course.nextactivitynotfound' : 'core.course.previousactivitynotfound'),
+                );
+
+                return;
+            }
         }
 
-        const options: CoreNavigationOptions = {
-            replace: true,
-            animationDirection: next ? 'forward' : 'back',
-        };
-
-        if (!CoreCourseHelper.canUserViewModule(module)) {
-            options.params = {
-                module,
-            };
-            CoreNavigator.navigateToSitePath('course/' + this.courseId + '/' + module.id +'/module-preview', options);
-        } else {
-            CoreCourseModuleDelegate.openActivityPage(module.modname, module, this.courseId, options);
-        }
+        await CoreCourseNavigation.navigateToActivity(moduleToOpen, direction, true);
     }
 
 }

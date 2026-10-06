@@ -13,13 +13,13 @@
 // limitations under the License.
 
 import { CoreSitesReadingStrategy } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { Subscription } from 'rxjs';
-import { AsyncDirective } from './async-directive';
+import type { AsyncDirective } from '../types/async-directive';
 import { PageLoadsManager } from './page-loads-manager';
 import { CorePromisedValue } from './promised-value';
 import { WSObservable } from './sites/authenticated-site';
-import { CoreWait } from '@singletons/wait';
+import { CoreWait } from '@static/wait';
 
 /**
  * Class to watch requests from a page load (including requests from page sub-components).
@@ -130,7 +130,7 @@ export class PageLoadWatcher {
                     return;
                 }
 
-                this.hasChangesPromises.push(CoreUtils.ignoreErrors(hasMeaningfulChanges(firstValue, value), false));
+                this.hasChangesPromises.push(CorePromiseUtils.ignoreErrors(hasMeaningfulChanges(firstValue, value), false));
             },
             error: (error) => {
                 promisedValue.reject(error);

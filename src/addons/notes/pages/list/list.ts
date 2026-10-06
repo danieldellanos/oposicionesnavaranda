@@ -12,27 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreConstants } from '@/core/constants';
+import { CoreRefreshIcon, CoreSyncIcon } from '@/core/constants';
 import { AddonNotesAddModalReturn } from '@addons/notes/components/add/add-modal';
 import { AddonNotes, AddonNotesNoteFormatted, AddonNotesPublishState } from '@addons/notes/services/notes';
 import { AddonNotesOffline } from '@addons/notes/services/notes-offline';
-import { AddonNotesSync, AddonNotesSyncProvider } from '@addons/notes/services/notes-sync';
-import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { CoreAnimations } from '@components/animations';
+import { AddonNotesSync } from '@addons/notes/services/notes-sync';
+import { Component, OnDestroy, OnInit, viewChild } from '@angular/core';
 import { CoreUser, CoreUserProfile } from '@features/user/services/user';
 import { IonContent } from '@ionic/angular';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
 import { CoreNavigator } from '@services/navigator';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreText } from '@singletons/text';
-import { CoreUrl } from '@singletons/url';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreText } from '@static/text';
+import { CoreUrl } from '@static/url';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { Translate } from '@singletons';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
-import { CoreTime } from '@singletons/time';
-import { CoreToasts, ToastDuration } from '@services/toasts';
-import { CoreModals } from '@services/modals';
+import { CoreEventObserver, CoreEvents } from '@static/events';
+import { CoreTime } from '@static/time';
+import { CoreToasts, ToastDuration } from '@services/overlays/toasts';
+import { CoreModals } from '@services/overlays/modals';
+import { ADDON_NOTES_AUTO_SYNCED } from '@addons/notes/services/constants';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Page that displays a list of notes.
@@ -40,17 +41,19 @@ import { CoreModals } from '@services/modals';
 @Component({
     selector: 'page-addon-notes-list-page',
     templateUrl: 'list.html',
-    animations: [CoreAnimations.SLIDE_IN_OUT],
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class AddonNotesListPage implements OnInit, OnDestroy {
+export default class AddonNotesListPage implements OnInit, OnDestroy {
 
-    @ViewChild(IonContent) content?: IonContent;
+    readonly content = viewChild.required(IonContent);
 
     courseId!: number;
     userId?: number;
     type: AddonNotesPublishState = 'course';
-    refreshIcon = CoreConstants.ICON_LOADING;
-    syncIcon = CoreConstants.ICON_LOADING;
+    refreshIcon = CoreRefreshIcon.LOADING;
+    syncIcon = CoreSyncIcon.LOADING;
     notes: AddonNotesNoteFormatted[] = [];
     hasOffline = false;
     notesLoaded = false;
@@ -69,7 +72,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
             this.courseId = CoreNavigator.getRequiredRouteNumberParam('courseId');
             this.userId = CoreNavigator.getRouteNumberParam('userId');
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
 
             CoreNavigator.back();
 
@@ -77,17 +80,17 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
         }
 
         // Refresh data if notes are synchronized automatically.
-        this.syncObserver = CoreEvents.on(AddonNotesSyncProvider.AUTO_SYNCED, (data) => {
+        this.syncObserver = CoreEvents.on(ADDON_NOTES_AUTO_SYNCED, (data) => {
             if (data.courseId == this.courseId) {
                 // Show the sync warnings.
                 this.showSyncWarnings(data.warnings);
 
                 // Refresh the data.
                 this.notesLoaded = false;
-                this.refreshIcon = CoreConstants.ICON_LOADING;
-                this.syncIcon = CoreConstants.ICON_LOADING;
+                this.refreshIcon = CoreRefreshIcon.LOADING;
+                this.syncIcon = CoreSyncIcon.LOADING;
 
-                this.content?.scrollToTop();
+                this.content().scrollToTop();
                 this.fetchNotes(false);
             }
         }, CoreSites.getCurrentSiteId());
@@ -117,7 +120,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
         try {
             const allNotes = await AddonNotes.getNotes(this.courseId, this.userId);
 
-            const notesList: AddonNotesNoteFormatted[] = allNotes[this.type + 'notes'] || [];
+            const notesList: AddonNotesNoteFormatted[] = allNotes[`${this.type}notes`] || [];
 
             notesList.forEach((note) => {
                 note.content = CoreText.decodeHTML(note.content);
@@ -138,7 +141,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
 
             this.logView();
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
         } finally {
             let canDelete = this.notes && this.notes.length > 0;
             if (canDelete && this.type == 'personal') {
@@ -147,8 +150,8 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
             this.canDeleteNotes = canDelete;
 
             this.notesLoaded = true;
-            this.refreshIcon = CoreConstants.ICON_REFRESH;
-            this.syncIcon = CoreConstants.ICON_SYNC;
+            this.refreshIcon = CoreRefreshIcon.REFRESH;
+            this.syncIcon = CoreSyncIcon.SYNC;
         }
     }
 
@@ -159,8 +162,8 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
      * @param refresher Refresher instance.
      */
     refreshNotes(showSyncErrors: boolean, refresher?: HTMLIonRefresherElement): void {
-        this.refreshIcon = CoreConstants.ICON_LOADING;
-        this.syncIcon = CoreConstants.ICON_LOADING;
+        this.refreshIcon = CoreRefreshIcon.LOADING;
+        this.syncIcon = CoreSyncIcon.LOADING;
 
         AddonNotes.invalidateNotes(this.courseId, this.userId).finally(() => {
             this.fetchNotes(true, showSyncErrors).finally(() => {
@@ -173,14 +176,11 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
 
     /**
      * Function called when the type has changed.
-     *
-     * @param type New type.
      */
-    async typeChanged(type: AddonNotesPublishState): Promise<void> {
-        this.type = type;
+    async typeChanged(): Promise<void> {
         this.notesLoaded = false;
-        this.refreshIcon = CoreConstants.ICON_LOADING;
-        this.syncIcon = CoreConstants.ICON_LOADING;
+        this.refreshIcon = CoreRefreshIcon.LOADING;
+        this.syncIcon = CoreSyncIcon.LOADING;
 
         await this.fetchNotes(true);
     }
@@ -217,7 +217,8 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
 
                 this.refreshNotes(false);
             } else if (modalData.type && modalData.type != this.type) {
-                this.typeChanged(modalData.type);
+                this.type = modalData.type;
+                this.typeChanged();
             }
         }
     }
@@ -235,7 +236,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
         try {
             this.logViewDelete(note);
 
-            await CoreDomUtils.showDeleteConfirm('addon.notes.deleteconfirm');
+            await CoreAlerts.confirmDelete(Translate.instant('addon.notes.deleteconfirm'));
             try {
                 await AddonNotes.deleteNote(note, this.courseId);
                 this.showDelete = false;
@@ -249,7 +250,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
                 });
 
             } catch (error) {
-                CoreDomUtils.showErrorModalDefault(error, 'Delete note failed.');
+                CoreAlerts.showError(error, { default: 'Delete note failed.' });
             }
         } catch {
             // User cancelled, nothing to do.
@@ -290,7 +291,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
             this.showSyncWarnings(result.warnings);
         } catch (error) {
             if (showSyncErrors) {
-                CoreDomUtils.showErrorModalDefault(error, 'core.errorsync', true);
+                CoreAlerts.showError(error, { default: Translate.instant('core.errorsync') });
             }
         }
     }
@@ -304,7 +305,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
         const message = CoreText.buildMessage(warnings);
 
         if (message) {
-            CoreDomUtils.showAlert(undefined, message);
+            CoreAlerts.show({ message });
         }
     }
 
@@ -312,7 +313,7 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
      * Log view.
      */
     protected async performLogView(): Promise<void> {
-        await CoreUtils.ignoreErrors(AddonNotes.logView(this.courseId, this.userId));
+        await CorePromiseUtils.ignoreErrors(AddonNotes.logView(this.courseId, this.userId));
 
         CoreAnalytics.logEvent({
             type: CoreAnalyticsEventType.VIEW_ITEM_LIST,
@@ -345,6 +346,8 @@ export class AddonNotesListPage implements OnInit, OnDestroy {
 
     /**
      * Log view.
+     *
+     * @param note Note to log.
      */
     protected async logViewDelete(note: AddonNotesNoteFormatted): Promise<void> {
         if (!note.id) {

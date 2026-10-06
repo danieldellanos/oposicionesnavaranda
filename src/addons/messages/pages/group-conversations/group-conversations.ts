@@ -12,34 +12,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, viewChild } from '@angular/core';
 import { AccordionGroupChangeEventDetail, IonAccordionGroup, IonContent } from '@ionic/angular';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { CoreEventObserver, CoreEvents } from '@static/events';
 import { CoreSites } from '@services/sites';
 import {
-    AddonMessagesProvider,
     AddonMessagesConversationFormatted,
     AddonMessages,
     AddonMessagesNewMessagedEventData,
     AddonMessagesUnreadConversationCountsEventData,
-    AddonMessagesUpdateConversationAction,
 } from '../../services/messages';
 import {
     AddonMessagesOffline,
     AddonMessagesOfflineAnyMessagesFormatted,
 } from '../../services/messages-offline';
-import { CoreDomUtils } from '@services/utils/dom';
 import { CoreUser } from '@features/user/services/user';
 import { CorePushNotificationsDelegate } from '@features/pushnotifications/services/push-delegate';
 import { Translate } from '@singletons';
 import { Subscription } from 'rxjs';
 import { CorePushNotificationsNotificationBasicData } from '@features/pushnotifications/services/pushnotifications';
 import { ActivatedRoute, Params } from '@angular/router';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUtils } from '@static/utils';
 import { CoreNavigator } from '@services/navigator';
 import { CoreScreen } from '@services/screen';
 import { CorePlatform } from '@services/platform';
 import { CoreSplitViewComponent } from '@components/split-view/split-view';
+import {
+    ADDON_MESSAGES_CONTACT_REQUESTS_COUNT_EVENT,
+    ADDON_MESSAGES_MEMBER_INFO_CHANGED_EVENT,
+    ADDON_MESSAGES_NEW_MESSAGE_EVENT,
+    ADDON_MESSAGES_OPEN_CONVERSATION_EVENT,
+    ADDON_MESSAGES_READ_CHANGED_EVENT,
+    ADDON_MESSAGES_UNREAD_CONVERSATION_COUNTS_EVENT,
+    ADDON_MESSAGES_UPDATE_CONVERSATION_LIST_EVENT,
+    AddonMessagesMessageConversationType,
+    AddonMessagesUpdateConversationAction,
+} from '@addons/messages/constants';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreMainMenuUserButtonComponent } from '@features/mainmenu/components/user-menu-button/user-menu-button';
 
 const enum AddonMessagesGroupConversationOptionNames {
     FAVOURITES = 'favourites',
@@ -53,13 +64,17 @@ const enum AddonMessagesGroupConversationOptionNames {
 @Component({
     selector: 'page-addon-messages-group-conversations',
     templateUrl: 'group-conversations.html',
-    styleUrls: ['../../messages-common.scss'],
+    styleUrl: '../../messages-common.scss',
+    imports: [
+        CoreSharedModule,
+        CoreMainMenuUserButtonComponent,
+    ],
 })
-export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
+export default class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
-    @ViewChild(CoreSplitViewComponent) splitView!: CoreSplitViewComponent;
-    @ViewChild(IonContent) content?: IonContent;
-    @ViewChild('accordionGroup', { static: true }) accordionGroup!: IonAccordionGroup;
+    readonly splitView = viewChild.required(CoreSplitViewComponent);
+    readonly content = viewChild.required(IonContent);
+    readonly accordionGroup = viewChild.required<IonAccordionGroup>('accordionGroup');
 
     loaded = false;
     loadingMessage: string;
@@ -82,7 +97,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
             optionName: AddonMessagesGroupConversationOptionNames.GROUP,
             titleString: 'addon.messages.groupconversations',
             emptyString: 'addon.messages.nogroupconversations',
-            type: AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_GROUP,
+            type: AddonMessagesMessageConversationType.GROUP,
             favourites: false,
             count: 0,
             unread: 0,
@@ -92,7 +107,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
             optionName: AddonMessagesGroupConversationOptionNames.INDIVIDUAL,
             titleString: 'addon.messages.individualconversations',
             emptyString: 'addon.messages.noindividualconversations',
-            type: AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_INDIVIDUAL,
+            type: AddonMessagesMessageConversationType.INDIVIDUAL,
             favourites: false,
             count: 0,
             unread: 0,
@@ -100,7 +115,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
         },
     ];
 
-    typeGroup = AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_GROUP;
+    typeGroup = AddonMessagesMessageConversationType.GROUP;
 
     protected siteId: string;
     protected currentUserId: number;
@@ -113,18 +128,18 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
     protected updateConversationListObserver: CoreEventObserver;
     protected contactRequestsCountObserver: CoreEventObserver;
     protected memberInfoObserver: CoreEventObserver;
+    protected routeSubscription?: Subscription;
     protected firstExpand = false;
+    protected route = inject(ActivatedRoute);
 
-    constructor(
-        protected route: ActivatedRoute,
-    ) {
+    constructor() {
         this.loadingMessage = Translate.instant('core.loading');
         this.siteId = CoreSites.getCurrentSiteId();
         this.currentUserId = CoreSites.getCurrentSiteUserId();
 
         // Update conversations when new message is received.
         this.newMessagesObserver = CoreEvents.on(
-            AddonMessagesProvider.NEW_MESSAGE_EVENT,
+            ADDON_MESSAGES_NEW_MESSAGE_EVENT,
             (data) => {
                 // Check if the new message belongs to the option that is currently expanded.
                 const expandedOption = this.getExpandedOption();
@@ -163,7 +178,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
                     conversation.lastmessagedate = data.timecreated / 1000;
                     if (data.userFrom) {
                         conversation.sentfromcurrentuser = data.userFrom.id === this.currentUserId;
-                        if (conversation.type === AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_GROUP) {
+                        if (conversation.type === AddonMessagesMessageConversationType.GROUP) {
                             conversation.members[0] = data.userFrom;
                         }
                     }
@@ -175,7 +190,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
                     if (isNewer) {
                         // The last message is newer than the previous one, scroll to top to keep viewing the conversation.
-                        this.content?.scrollToTop();
+                        this.content().scrollToTop();
                     }
                 }
             },
@@ -183,7 +198,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
         );
 
         // Update conversations when a message is read.
-        this.readChangedObserver = CoreEvents.on(AddonMessagesProvider.READ_CHANGED_EVENT, (data) => {
+        this.readChangedObserver = CoreEvents.on(ADDON_MESSAGES_READ_CHANGED_EVENT, (data) => {
             if (data.conversationId) {
                 const conversation = this.findConversation(data.conversationId);
 
@@ -200,7 +215,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
         // Load a discussion if we receive an event to do so.
         this.openConversationObserver = CoreEvents.on(
-            AddonMessagesProvider.OPEN_CONVERSATION_EVENT,
+            ADDON_MESSAGES_OPEN_CONVERSATION_EVENT,
             (data) => {
                 if (data.conversationId || data.userId) {
                     this.gotoConversation(data.conversationId, data.userId);
@@ -222,7 +237,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
         // Update conversations if we receive an event to do so.
         this.updateConversationListObserver = CoreEvents.on(
-            AddonMessagesProvider.UPDATE_CONVERSATION_LIST_EVENT,
+            ADDON_MESSAGES_UPDATE_CONVERSATION_LIST_EVENT,
             (data) => {
                 if (data?.action === AddonMessagesUpdateConversationAction.MUTE) {
                     // If the conversation is displayed, change its muted value.
@@ -256,7 +271,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
         // Update unread conversation counts.
         this.cronObserver = CoreEvents.on(
-            AddonMessagesProvider.UNREAD_CONVERSATION_COUNTS_EVENT,
+            ADDON_MESSAGES_UNREAD_CONVERSATION_COUNTS_EVENT,
             (data) => {
                 this.setCounts(data, 'unread');
             },
@@ -265,7 +280,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
         // Update the contact requests badge.
         this.contactRequestsCountObserver = CoreEvents.on(
-            AddonMessagesProvider.CONTACT_REQUESTS_COUNT_EVENT,
+            ADDON_MESSAGES_CONTACT_REQUESTS_COUNT_EVENT,
             (data) => {
                 this.contactRequestsCount = data.count;
             },
@@ -274,7 +289,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
         // Update block status of a user.
         this.memberInfoObserver = CoreEvents.on(
-            AddonMessagesProvider.MEMBER_INFO_CHANGED_EVENT,
+            ADDON_MESSAGES_MEMBER_INFO_CHANGED_EVENT,
             (data) => {
                 if (!data.userBlocked && !data.userUnblocked) {
                 // The block status has not changed, ignore.
@@ -300,10 +315,10 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
      * @inheritdoc
      */
     async ngOnInit(): Promise<void> {
-        this.route.queryParams.subscribe(async (params) => {
+        this.routeSubscription = this.route.queryParams.subscribe(() => {
             // When a child page loads this callback is triggered too.
-            const conversationId = CoreNavigator.getRouteNumberParam('conversationId', { params });
-            const userId = CoreNavigator.getRouteNumberParam('userId', { params });
+            const conversationId = CoreNavigator.getRouteNumberParam('conversationId');
+            const userId = CoreNavigator.getRouteNumberParam('userId');
             if (conversationId || userId) {
                 // Update the selected ones.
                 this.selectedConversationId = conversationId;
@@ -333,7 +348,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
      * @param refreshUnreadCounts Whether to refresh unread counts.
      * @returns Promise resolved when done.
      */
-    protected async fetchData(refreshUnreadCounts: boolean = true): Promise<void> {
+    protected async fetchData(refreshUnreadCounts = true): Promise<void> {
         // Load the amount of conversations and contact requests.
         const promises: Promise<unknown>[] = [];
 
@@ -372,7 +387,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
             // Load the data for the expanded option.
             await this.fetchDataForExpandedOption();
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.messages.errorwhileretrievingdiscussions', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.messages.errorwhileretrievingdiscussions') });
         }
         this.loaded = true;
     }
@@ -393,7 +408,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
                 expandOption = this.getConversationGroupByName(AddonMessagesGroupConversationOptionNames.INDIVIDUAL);
             }
 
-            this.accordionGroup.value = expandOption.optionName;
+            this.accordionGroup().value = expandOption.optionName;
 
             this.firstExpand = true;
         }
@@ -547,8 +562,9 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
      * @returns Option currently expanded.
      */
     protected getExpandedOption(): AddonMessagesGroupConversationOption | undefined {
-        if (this.accordionGroup.value) {
-            return this.getConversationGroupByName(this.accordionGroup.value as AddonMessagesGroupConversationOptionNames);
+        const accordionGroup = this.accordionGroup();
+        if (accordionGroup.value) {
+            return this.getConversationGroupByName(accordionGroup.value as AddonMessagesGroupConversationOptionNames);
         }
     }
 
@@ -578,9 +594,10 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
         const path = CoreNavigator.getRelativePathToParent('/messages/group-conversations') + 'discussion/' +
             (conversationId ? conversationId : `user/${userId}`);
 
+        const splitView = this.splitView();
         await CoreNavigator.navigate(path, {
             params,
-            reset: CoreScreen.isTablet && !!this.splitView && !this.splitView.isNested,
+            reset: CoreScreen.isTablet && !!splitView && !splitView.isNested,
         });
     }
 
@@ -602,7 +619,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
         try {
             await this.fetchDataForOption(option, true);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.messages.errorwhileretrievingdiscussions', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.messages.errorwhileretrievingdiscussions') });
             option.loadMoreError = true;
         }
 
@@ -638,7 +655,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
                     // Conversation not found, it could be an old one or the message could belong to another option.
                     conversation = {
                         id: message.conversationid,
-                        type: message.conversation?.type || AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_INDIVIDUAL,
+                        type: message.conversation?.type || AddonMessagesMessageConversationType.INDIVIDUAL,
                         membercount: message.conversation?.membercount || 0,
                         ismuted: message.conversation?.ismuted || false,
                         isfavourite: message.conversation?.isfavourite || false,
@@ -657,7 +674,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
                         this.addOfflineConversation(conversation, option);
                     }
                 }
-            } else if (option.type === AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_INDIVIDUAL) {
+            } else if (option.type === AddonMessagesMessageConversationType.INDIVIDUAL) {
                 // It's a new conversation. Check if we already created it (there is more than one message for the same user).
                 const conversation = this.findConversation(undefined, message.touserid, option);
 
@@ -675,7 +692,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
                     }).then((user) => {
                         const conversation: AddonMessagesConversationForList = {
                             id: 0,
-                            type: AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_INDIVIDUAL,
+                            type: AddonMessagesMessageConversationType.INDIVIDUAL,
                             membercount: 0, // Faked data.
                             ismuted: false, // Faked data.
                             isfavourite: false, // Faked data.
@@ -742,7 +759,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
             return AddonMessagesGroupConversationOptionNames.FAVOURITES;
         }
 
-        if (conversation.type === AddonMessagesProvider.MESSAGE_CONVERSATION_TYPE_GROUP) {
+        if (conversation.type === AddonMessagesMessageConversationType.GROUP) {
             return AddonMessagesGroupConversationOptionNames.GROUP;
         }
 
@@ -756,7 +773,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
      * @param refreshUnreadCounts Whether to refresh unread counts.
      * @returns Promise resolved when done.
      */
-    async refreshData(refresher?: HTMLIonRefresherElement, refreshUnreadCounts: boolean = true): Promise<void> {
+    async refreshData(refresher?: HTMLIonRefresherElement, refreshUnreadCounts = true): Promise<void> {
         // Don't invalidate conversations and so, they always try to get latest data.
         try {
             await AddonMessages.invalidateContactRequestsCountCache(this.siteId);
@@ -784,7 +801,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
 
         // Pass getCounts=true to update the counts everytime the user expands an option.
         this.expandOption(option, true).catch((error) => {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.messages.errorwhileretrievingdiscussions', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.messages.errorwhileretrievingdiscussions') });
         });
     }
 
@@ -798,12 +815,12 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
     protected async expandOption(option: AddonMessagesGroupConversationOption, getCounts = false): Promise<void> {
         // Collapse all and expand the right one.
         option.loading = true;
-        this.accordionGroup.value = option.optionName;
+        this.accordionGroup().value = option.optionName;
 
         try {
             await this.fetchDataForOption(option, false, getCounts);
         } catch (error) {
-            this.accordionGroup.value = undefined;
+            this.accordionGroup().value = undefined;
 
             throw error;
         } finally {
@@ -831,6 +848,7 @@ export class AddonMessagesGroupConversationsPage implements OnInit, OnDestroy {
         this.updateConversationListObserver?.off();
         this.contactRequestsCountObserver?.off();
         this.memberInfoObserver?.off();
+        this.routeSubscription?.unsubscribe();
     }
 
 }

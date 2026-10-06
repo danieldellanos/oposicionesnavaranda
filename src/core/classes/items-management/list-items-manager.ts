@@ -18,19 +18,20 @@ import { Subscription } from 'rxjs';
 import { CoreSplitViewComponent } from '@components/split-view/split-view';
 import { CoreNavigator } from '@services/navigator';
 import { CoreScreen } from '@services/screen';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUtils } from '@static/utils';
 
 import { CoreRoutedItemsManagerSource } from './routed-items-manager-source';
 import { CoreRoutedItemsManager } from './routed-items-manager';
-import { CoreDom } from '@singletons/dom';
-import { CoreTime } from '@singletons/time';
+import { CoreDom } from '@static/dom';
+import { CoreTime } from '@static/time';
+import { CorePromiseUtils } from '@static/promise-utils';
 
 /**
  * Helper class to manage the state and routing of a list of items in a page.
  */
 export class CoreListItemsManager<
     Item = unknown,
-    Source extends CoreRoutedItemsManagerSource<Item> = CoreRoutedItemsManagerSource<Item>
+    Source extends CoreRoutedItemsManagerSource<Item> = CoreRoutedItemsManagerSource<Item>,
 > extends CoreRoutedItemsManager<Item, Source> {
 
     protected pageRouteLocator?: unknown | ActivatedRoute;
@@ -45,7 +46,7 @@ export class CoreListItemsManager<
 
         this.pageRouteLocator = pageRouteLocator;
         this.addListener({ onSelectedItemUpdated: debouncedScrollToCurrentElement });
-        this.finishSuccessfulFetch = CoreTime.once(() => CoreUtils.ignoreErrors(this.logActivity()));
+        this.finishSuccessfulFetch = CoreTime.once(() => CorePromiseUtils.ignoreErrors(this.logActivity()));
     }
 
     get items(): Item[] {

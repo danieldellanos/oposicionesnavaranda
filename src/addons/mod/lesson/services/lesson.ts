@@ -14,23 +14,20 @@
 
 import { Injectable } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
-import { CoreSite } from '@classes/sites/site';
 import { CoreCourseCommonModWSOptions } from '@features/course/services/course';
 import { CoreCourseLogHelper } from '@features/course/services/log-helper';
 import { CoreSites, CoreSitesCommonWSOptions, CoreSitesReadingStrategy } from '@services/sites';
 import { convertTextToHTMLElement } from '@/core/utils/create-html-element';
-import { CoreText } from '@singletons/text';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreText, CoreTextFormat, DEFAULT_TEXT_FORMAT } from '@static/text';
+import { CoreUtils } from '@static/utils';
 import { CoreWSExternalFile, CoreWSExternalWarning } from '@services/ws';
 import { makeSingleton, Translate } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import { AddonModLessonPasswordDBRecord, PASSWORD_TABLE_NAME } from './database/lesson';
 import { AddonModLessonOffline, AddonModLessonPageAttemptRecord } from './lesson-offline';
-import { AddonModLessonAutoSyncData } from './lesson-sync';
 import { CoreSiteWSPreSets } from '@classes/sites/authenticated-site';
 import {
-    ADDON_MOD_LESSON_AUTO_SYNCED,
-    ADDON_MOD_LESSON_COMPONENT,
+    ADDON_MOD_LESSON_COMPONENT_LEGACY,
     ADDON_MOD_LESSON_DATA_SENT_EVENT,
     ADDON_MOD_LESSON_OTHER_ANSWERS,
     AddonModLessonJumpTo,
@@ -38,8 +35,13 @@ import {
     AddonModLessonPageSubtype,
 } from '../constants';
 import { CoreGradeType } from '@features/grades/constants';
+import { CoreCacheUpdateFrequency } from '@/core/constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreObject } from '@static/object';
+import { CoreArray } from '@static/array';
+import { CoreCourseModuleHelper } from '@features/course/services/course-module-helper';
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -48,7 +50,6 @@ declare module '@singletons/events' {
      */
     export interface CoreEventsData {
         [ADDON_MOD_LESSON_DATA_SENT_EVENT]: AddonModLessonDataSentData;
-        [ADDON_MOD_LESSON_AUTO_SYNCED]: AddonModLessonAutoSyncData;
     }
 
 }
@@ -85,7 +86,7 @@ export class AddonModLessonProvider {
     protected addAnswerAndResponseToFeedback(
         feedback: string,
         answer: string,
-        answerFormat: number,
+        answerFormat: CoreTextFormat,
         response: string,
         className: string,
     ): string {
@@ -136,8 +137,8 @@ export class AddonModLessonProvider {
         let message = '';
 
         if (addMessage) {
-            const params = typeof value != 'boolean' ? { $a: value } : undefined;
-            message = Translate.instant('addon.mod_lesson.' + name, params);
+            const params = typeof value !== 'boolean' ? { $a: value } : undefined;
+            message = Translate.instant(`addon.mod_lesson.${name}`, params);
         }
 
         result.data[name] = {
@@ -212,7 +213,7 @@ export class AddonModLessonProvider {
     protected async calculateOfflineData(
         lesson: AddonModLessonLessonWSData,
         options: AddonModLessonCalculateOfflineDataOptions = {},
-    ): Promise<{reviewmode: boolean; progress?: number; ongoingscore: string}> {
+    ): Promise<{ reviewmode: boolean; progress?: number; ongoingscore: string }> {
 
         const reviewMode = !!(options.review || options.accessInfo?.reviewmode);
         let ongoingMessage = '';
@@ -288,7 +289,7 @@ export class AddonModLessonProvider {
         const validPages = {};
         let pageId = accessInfo.firstpageid;
 
-        viewedPagesIds = CoreUtils.mergeArraysWithoutDuplicates(viewedPagesIds, viewedContentPagesIds);
+        viewedPagesIds = CoreArray.mergeWithoutDuplicates(viewedPagesIds, viewedContentPagesIds);
 
         // Filter out the following pages:
         // - End of Cluster
@@ -301,7 +302,10 @@ export class AddonModLessonProvider {
         }
 
         // Progress calculation as a percent.
-        return CoreText.roundToDecimals(viewedPagesIds.length / Object.keys(validPages).length, 2) * 100;
+        const progress = CoreText.roundToDecimals(viewedPagesIds.length / Object.keys(validPages).length, 2) * 100;
+
+        // Round the value to avoid floating-point precision issues (e.g. 7.0000000000001).
+        return Math.round(progress);
     }
 
     /**
@@ -400,12 +404,12 @@ export class AddonModLessonProvider {
         // The name was changed to "answer_editor" in 3.7. Before it was just "answer". Support both cases.
         if (data['answer_editor[text]'] !== undefined) {
             studentAnswer = data['answer_editor[text]'];
-        } else if (typeof data.answer_editor == 'object') {
-            studentAnswer = (<{text: string}> data.answer_editor).text;
+        } else if (typeof data.answer_editor === 'object') {
+            studentAnswer = (<{ text: string }> data.answer_editor).text;
         } else if (data['answer[text]'] !== undefined) {
             studentAnswer = data['answer[text]'];
-        } else if (typeof data.answer == 'object') {
-            studentAnswer = (<{text: string}> data.answer).text;
+        } else if (typeof data.answer === 'object') {
+            studentAnswer = (<{ text: string }> data.answer).text;
         } else {
             studentAnswer = data.answer;
         }
@@ -427,11 +431,11 @@ export class AddonModLessonProvider {
             graded: 0,
             score: 0,
             answer: studentAnswer,
-            answerformat: 1,
+            answerformat: DEFAULT_TEXT_FORMAT,
             response: '',
-            responseformat: 1,
+            responseformat: DEFAULT_TEXT_FORMAT,
         };
-        result.studentanswerformat = 1;
+        result.studentanswerformat = DEFAULT_TEXT_FORMAT;
         result.studentanswer = studentAnswer;
     }
 
@@ -471,7 +475,7 @@ export class AddonModLessonProvider {
         let hits = 0;
 
         result.studentanswer = '';
-        result.studentanswerformat = 1;
+        result.studentanswerformat = DEFAULT_TEXT_FORMAT;
 
         for (const id in response) {
             let value = response[id];
@@ -488,7 +492,7 @@ export class AddonModLessonProvider {
             if (answers[id] !== undefined) {
                 const answer = answers[id];
 
-                result.studentanswer += '<br />' + answer.answer + ' = ' + value;
+                result.studentanswer += `<br />${answer.answer} = ${value}`;
                 if (answer.response && answer.response.trim() == value.trim()) {
                     hits++;
                 }
@@ -561,7 +565,7 @@ export class AddonModLessonProvider {
 
             // Store student's answers for displaying on feedback page.
             result.studentanswer = '';
-            result.studentanswerformat = 1;
+            result.studentanswerformat = DEFAULT_TEXT_FORMAT;
             answers.forEach((answer) => {
                 for (const i in studentAnswers) {
                     const answerId = studentAnswers[i];
@@ -725,7 +729,7 @@ export class AddonModLessonProvider {
         result: AddonModLessonCheckAnswerResult,
     ): void {
 
-        let studentAnswer = typeof data.answer == 'string' ? data.answer.trim() : false;
+        let studentAnswer = typeof data.answer === 'string' ? data.answer.trim() : false;
         if (!studentAnswer) {
             result.noanswer = true;
 
@@ -754,11 +758,11 @@ export class AddonModLessonProvider {
             // See if user typed in any of the correct answers.
             if (this.isAnswerCorrect(lesson, pageData.page!.id, answer, pageIndex)) {
                 if (!useRegExp) { // We are using 'normal analysis', which ignores case.
-                    if (studentAnswer.match(new RegExp('^' + expectedAnswer + '$', 'i'))) {
+                    if (studentAnswer.match(new RegExp(`^${expectedAnswer}$`, 'i'))) {
                         isMatch = true;
                     }
                 } else {
-                    if (studentAnswer.match(new RegExp('^' + expectedAnswer + '$', ignoreCase))) {
+                    if (studentAnswer.match(new RegExp(`^${expectedAnswer}$`, ignoreCase))) {
                         isMatch = true;
                     }
                 }
@@ -769,7 +773,7 @@ export class AddonModLessonProvider {
                 if (!useRegExp) {
                     // We are using 'normal analysis'.
                     // See if user typed in any of the wrong answers; don't worry about case.
-                    if (studentAnswer.match(new RegExp('^' + expectedAnswer + '$', 'i'))) {
+                    if (studentAnswer.match(new RegExp(`^${expectedAnswer}$`, 'i'))) {
                         isMatch = true;
                     }
                 } else { // We are using regular expressions analysis.
@@ -779,7 +783,7 @@ export class AddonModLessonProvider {
                         // 1- Check for absence of required string in studentAnswer (coded by initial '--').
                         case '--':
                             expectedAnswer = expectedAnswer.substring(2);
-                            if (!studentAnswer.match(new RegExp('^' + expectedAnswer + '$', ignoreCase))) {
+                            if (!studentAnswer.match(new RegExp(`^${expectedAnswer}$`, ignoreCase))) {
                                 isMatch = true;
                             }
                             break;
@@ -789,7 +793,7 @@ export class AddonModLessonProvider {
                             expectedAnswer = expectedAnswer.substring(2);
 
                             // Check for one or several matches.
-                            const matches = studentAnswer.match(new RegExp(expectedAnswer, 'g' + ignoreCase));
+                            const matches = studentAnswer.match(new RegExp(expectedAnswer, `g${ignoreCase}`));
                             if (matches) {
                                 isMatch = true;
                                 const nb = matches.length;
@@ -798,7 +802,7 @@ export class AddonModLessonProvider {
 
                                 for (let j = 0; j < nb; j++) {
                                     original.push(matches[j]);
-                                    marked.push('<span class="incorrect matches">' + matches[j] + '</span>');
+                                    marked.push(`<span class="incorrect matches">${matches[j]}</span>`);
                                 }
 
                                 for (let j = 0; j < original.length; j++) {
@@ -809,7 +813,7 @@ export class AddonModLessonProvider {
                         }
                         // 3- Check for wrong answers belonging neither to -- nor to ++ categories.
                         default:
-                            if (studentAnswer.match(new RegExp('^' + expectedAnswer + '$', ignoreCase))) {
+                            if (studentAnswer.match(new RegExp(`^${expectedAnswer}$`, ignoreCase))) {
                                 isMatch = true;
                             }
                             break;
@@ -890,7 +894,7 @@ export class AddonModLessonProvider {
             const lastAnswer = pageData.answers[pageData.answers.length - 1] || {};
 
             // Double check that this is the OTHER_ANSWERS answer.
-            if (typeof lastAnswer.answer == 'string' &&
+            if (typeof lastAnswer.answer === 'string' &&
                     lastAnswer.answer.indexOf(ADDON_MOD_LESSON_OTHER_ANSWERS) !== -1) {
                 result.newpageid = lastAnswer.jumpto || 0;
                 result.response = lastAnswer.response || '';
@@ -969,7 +973,7 @@ export class AddonModLessonProvider {
             outoftime: !!options.outOfTime,
             review: !!options.review,
         };
-        if (typeof options.password == 'string') {
+        if (typeof options.password === 'string') {
             params.password = options.password;
         }
 
@@ -979,7 +983,7 @@ export class AddonModLessonProvider {
         const map: Record<string, AddonModLessonEOLPageDataEntry> = {};
 
         response.data.forEach((entry) => {
-            if (entry.value && typeof entry.value == 'string' && entry.value !== '1') {
+            if (entry.value && typeof entry.value === 'string' && entry.value !== '1') {
                 // It's a JSON encoded object. Try to decode it.
                 entry.value = CoreText.parseJSON(entry.value);
             }
@@ -1016,7 +1020,7 @@ export class AddonModLessonProvider {
             siteId: options.siteId,
         };
 
-        const gradeInfo = await CoreUtils.ignoreErrors(this.lessonGrade(lesson, retake, newOptions));
+        const gradeInfo = await CorePromiseUtils.ignoreErrors(this.lessonGrade(lesson, retake, newOptions));
 
         // Retake marked, now return the response.
         return this.processEolPage(lesson, courseId, options, gradeInfo);
@@ -1160,8 +1164,8 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getAccessInformationCacheKey(lessonId),
-            updateFrequency: CoreSite.FREQUENCY_OFTEN,
-            component: ADDON_MOD_LESSON_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.OFTEN,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -1176,7 +1180,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getAccessInformationCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'accessInfo:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}accessInfo:${lessonId}`;
     }
 
     /**
@@ -1191,12 +1195,12 @@ export class AddonModLessonProvider {
         lessonId: number,
         retake: number,
         options: CoreCourseCommonModWSOptions = {},
-    ): Promise<{online: AddonModLessonWSContentPageViewed[]; offline: AddonModLessonPageAttemptRecord[]}> {
+    ): Promise<{ online: AddonModLessonWSContentPageViewed[]; offline: AddonModLessonPageAttemptRecord[] }> {
         const type = AddonModLessonPageType.STRUCTURE;
 
         const [online, offline] = await Promise.all([
             this.getContentPagesViewedOnline(lessonId, retake, options),
-            CoreUtils.ignoreErrors(
+            CorePromiseUtils.ignoreErrors(
                 AddonModLessonOffline.getRetakeAttemptsForType(lessonId, retake, type, options.siteId),
             ),
         ]);
@@ -1215,7 +1219,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getContentPagesViewedCacheKey(lessonId: number, retake: number): string {
-        return this.getContentPagesViewedCommonCacheKey(lessonId) + ':' + retake;
+        return `${this.getContentPagesViewedCommonCacheKey(lessonId)}:${retake}`;
     }
 
     /**
@@ -1225,7 +1229,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getContentPagesViewedCommonCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'contentPagesViewed:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}contentPagesViewed:${lessonId}`;
     }
 
     /**
@@ -1277,7 +1281,7 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getContentPagesViewedCacheKey(lessonId, retake),
-            component: ADDON_MOD_LESSON_COMPONENT,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -1397,11 +1401,10 @@ export class AddonModLessonProvider {
      */
     protected async getLessonByField(
         courseId: number,
-        key: string,
+        key: 'id' | 'coursemodule',
         value: number,
         options: CoreSitesCommonWSOptions = {},
     ): Promise<AddonModLessonLessonWSData> {
-
         const site = await CoreSites.getSite(options.siteId);
 
         const params: AddonModLessonGetLessonsByCoursesWSParams = {
@@ -1409,8 +1412,8 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getLessonDataCacheKey(courseId),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_LESSON_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
@@ -1420,13 +1423,7 @@ export class AddonModLessonProvider {
             preSets,
         );
 
-        const currentLesson = response.lessons.find((lesson) => lesson[key] == value);
-
-        if (currentLesson) {
-            return currentLesson;
-        }
-
-        throw new CoreError(Translate.instant('core.course.modulenotfound'));
+        return CoreCourseModuleHelper.getActivityByField(response.lessons, key, value);
     }
 
     /**
@@ -1448,7 +1445,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getLessonDataCacheKey(courseId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'lesson:' + courseId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}lesson:${courseId}`;
     }
 
     /**
@@ -1471,12 +1468,12 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getLessonWithPasswordCacheKey(lessonId),
-            component: ADDON_MOD_LESSON_COMPONENT,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
-        if (typeof options.password == 'string') {
+        if (typeof options.password === 'string') {
             params.password = options.password;
         }
 
@@ -1488,7 +1485,7 @@ export class AddonModLessonProvider {
 
             if (validatePassword) {
                 // Invalidate the data and reject.
-                await CoreUtils.ignoreErrors(this.invalidateLessonWithPassword(lessonId, site.id));
+                await CorePromiseUtils.ignoreErrors(this.invalidateLessonWithPassword(lessonId, site.id));
 
                 throw new CoreError(Translate.instant('addon.mod_lesson.loginfail'));
             }
@@ -1504,7 +1501,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getLessonWithPasswordCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'lessonWithPswrd:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}lessonWithPswrd:${lessonId}`;
     }
 
     /**
@@ -1640,12 +1637,12 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getPageDataCacheKey(lesson.id, pageId),
-            component: ADDON_MOD_LESSON_COMPONENT,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
-        if (typeof options.password == 'string') {
+        if (typeof options.password === 'string') {
             params.password = options.password;
         }
 
@@ -1681,7 +1678,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getPageDataCacheKey(lessonId: number, pageId: number): string {
-        return this.getPageDataCommonCacheKey(lessonId) + ':' + pageId;
+        return `${this.getPageDataCommonCacheKey(lessonId)}:${pageId}`;
     }
 
     /**
@@ -1691,7 +1688,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getPageDataCommonCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'pageData:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}pageData:${lessonId}`;
     }
 
     /**
@@ -1710,13 +1707,13 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getPagesCacheKey(lessonId),
-            updateFrequency: CoreSite.FREQUENCY_SOMETIMES,
-            component: ADDON_MOD_LESSON_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.SOMETIMES,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
-        if (typeof options.password == 'string') {
+        if (typeof options.password === 'string') {
             params.password = options.password;
         }
 
@@ -1732,7 +1729,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getPagesCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'pages:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}pages:${lessonId}`;
     }
 
     /**
@@ -1754,7 +1751,7 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getPagesPossibleJumpsCacheKey(lessonId),
-            component: ADDON_MOD_LESSON_COMPONENT,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -1785,7 +1782,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getPagesPossibleJumpsCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'pagesJumps:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}pagesJumps:${lessonId}`;
     }
 
     /**
@@ -1888,7 +1885,7 @@ export class AddonModLessonProvider {
                 // Tell student how many questions they have seen, how many are required and their grade.
                 const retake = accessInfo.attemptscount;
 
-                const gradeInfo = await CoreUtils.ignoreErrors(this.lessonGrade(lesson, retake, options));
+                const gradeInfo = await CorePromiseUtils.ignoreErrors(this.lessonGrade(lesson, retake, options));
                 if (gradeInfo?.attempts) {
                     if (gradeInfo.nquestions < lesson.minquestions) {
                         this.addMessage(messages, 'addon.mod_lesson.numberofpagesviewednotice', {
@@ -1942,11 +1939,11 @@ export class AddonModLessonProvider {
         lessonId: number,
         retake: number,
         options: AddonModLessonGetQuestionsAttemptsOptions = {},
-    ): Promise<{online: AddonModLessonQuestionAttemptWSData[]; offline: AddonModLessonPageAttemptRecord[]}> {
+    ): Promise<{ online: AddonModLessonQuestionAttemptWSData[]; offline: AddonModLessonPageAttemptRecord[] }> {
 
         const [online, offline] = await Promise.all([
             this.getQuestionsAttemptsOnline(lessonId, retake, options),
-            CoreUtils.ignoreErrors(AddonModLessonOffline.getQuestionsAttempts(
+            CorePromiseUtils.ignoreErrors(AddonModLessonOffline.getQuestionsAttempts(
                 lessonId,
                 retake,
                 options.correct,
@@ -1970,7 +1967,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getQuestionsAttemptsCacheKey(lessonId: number, retake: number, userId: number): string {
-        return this.getQuestionsAttemptsCommonCacheKey(lessonId) + ':' + userId + ':' + retake;
+        return `${this.getQuestionsAttemptsCommonCacheKey(lessonId)}:${userId}:${retake}`;
     }
 
     /**
@@ -1980,7 +1977,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getQuestionsAttemptsCommonCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'questionsAttempts:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}questionsAttempts:${lessonId}`;
     }
 
     /**
@@ -2009,7 +2006,7 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getQuestionsAttemptsCacheKey(lessonId, retake, userId),
-            component: ADDON_MOD_LESSON_COMPONENT,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -2059,8 +2056,8 @@ export class AddonModLessonProvider {
         };
         const preSets = {
             cacheKey: this.getRetakesOverviewCacheKey(lessonId, groupId),
-            updateFrequency: CoreSite.FREQUENCY_OFTEN,
-            component: ADDON_MOD_LESSON_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.OFTEN,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -2082,7 +2079,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getRetakesOverviewCacheKey(lessonId: number, groupId: number): string {
-        return this.getRetakesOverviewCommonCacheKey(lessonId) + ':' + groupId;
+        return `${this.getRetakesOverviewCommonCacheKey(lessonId)}:${groupId}`;
     }
 
     /**
@@ -2092,7 +2089,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getRetakesOverviewCommonCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'retakesOverview:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}retakesOverview:${lessonId}`;
     }
 
     /**
@@ -2152,7 +2149,7 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getTimersCacheKey(lessonId, userId),
-            component: ADDON_MOD_LESSON_COMPONENT,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -2170,7 +2167,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getTimersCacheKey(lessonId: number, userId: number): string {
-        return this.getTimersCommonCacheKey(lessonId) + ':' + userId;
+        return `${this.getTimersCommonCacheKey(lessonId)}:${userId}`;
     }
 
     /**
@@ -2180,7 +2177,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getTimersCommonCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'timers:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}timers:${lessonId}`;
     }
 
     /**
@@ -2273,8 +2270,8 @@ export class AddonModLessonProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getUserRetakeCacheKey(lessonId, userId, retake),
-            updateFrequency: CoreSite.FREQUENCY_SOMETIMES,
-            component: ADDON_MOD_LESSON_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.SOMETIMES,
+            component: ADDON_MOD_LESSON_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -2291,7 +2288,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getUserRetakeCacheKey(lessonId: number, userId: number, retake: number): string {
-        return this.getUserRetakeUserCacheKey(lessonId, userId) + ':' + retake;
+        return `${this.getUserRetakeUserCacheKey(lessonId, userId)}:${retake}`;
     }
 
     /**
@@ -2302,7 +2299,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getUserRetakeUserCacheKey(lessonId: number, userId: number): string {
-        return this.getUserRetakeLessonCacheKey(lessonId) + ':' + userId;
+        return `${this.getUserRetakeLessonCacheKey(lessonId)}:${userId}`;
     }
 
     /**
@@ -2312,7 +2309,7 @@ export class AddonModLessonProvider {
      * @returns Cache key.
      */
     protected getUserRetakeLessonCacheKey(lessonId: number): string {
-        return AddonModLessonProvider.ROOT_CACHE_KEY + 'userRetake:' + lessonId;
+        return `${AddonModLessonProvider.ROOT_CACHE_KEY}userRetake:${lessonId}`;
     }
 
     /**
@@ -2398,7 +2395,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAccessInformation(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2411,7 +2407,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateContentPagesViewed(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2425,7 +2420,6 @@ export class AddonModLessonProvider {
      * @param lessonId Lesson ID.
      * @param retake Retake number.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateContentPagesViewedForRetake(lessonId: number, retake: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2438,7 +2432,6 @@ export class AddonModLessonProvider {
      *
      * @param courseId Course ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateLessonData(courseId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2451,7 +2444,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateLessonWithPassword(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2464,7 +2456,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidatePageData(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2478,7 +2469,6 @@ export class AddonModLessonProvider {
      * @param lessonId Lesson ID.
      * @param pageId Page ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidatePageDataForPage(lessonId: number, pageId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2491,7 +2481,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidatePages(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2504,7 +2493,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidatePagesPossibleJumps(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2517,7 +2505,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateQuestionsAttempts(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2532,7 +2519,6 @@ export class AddonModLessonProvider {
      * @param retake Retake number.
      * @param siteId Site ID. If not defined, current site..
      * @param userId User ID. If not defined, site's user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateQuestionsAttemptsForRetake(lessonId: number, retake: number, siteId?: string, userId?: number): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2545,7 +2531,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateRetakesOverview(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2559,7 +2544,6 @@ export class AddonModLessonProvider {
      * @param lessonId Lesson ID.
      * @param groupId Group ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateRetakesOverviewForGroup(lessonId: number, groupId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2572,7 +2556,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateTimers(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2586,7 +2569,6 @@ export class AddonModLessonProvider {
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
      * @param userId User ID. If not defined, site's current user.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateTimersForUser(lessonId: number, siteId?: string, userId?: number): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2601,7 +2583,6 @@ export class AddonModLessonProvider {
      * @param retake Retake number.
      * @param userId User ID. Undefined for current user.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserRetake(lessonId: number, retake: number, userId?: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2614,7 +2595,6 @@ export class AddonModLessonProvider {
      *
      * @param lessonId Lesson ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserRetakesForLesson(lessonId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2628,7 +2608,6 @@ export class AddonModLessonProvider {
      * @param lessonId Lesson ID.
      * @param userId User ID. Undefined for current user.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserRetakesForUser(lessonId: number, userId?: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -2724,10 +2703,10 @@ export class AddonModLessonProvider {
             lessonid: id,
             review: !!review,
         };
-        if (typeof password == 'string') {
+        if (typeof password === 'string') {
             params.password = password;
         }
-        if (typeof pageId == 'number') {
+        if (typeof pageId === 'number') {
             params.pageid = pageId;
         }
 
@@ -2939,14 +2918,14 @@ export class AddonModLessonProvider {
             lessonid: id,
         };
 
-        if (typeof password == 'string') {
+        if (typeof password === 'string') {
             params.password = password;
         }
 
         await CoreCourseLogHelper.log(
             'mod_lesson_view_lesson',
             params,
-            ADDON_MOD_LESSON_COMPONENT,
+            ADDON_MOD_LESSON_COMPONENT_LEGACY,
             id,
             siteId,
         );
@@ -3089,11 +3068,11 @@ export class AddonModLessonProvider {
         const params: AddonModLessonProcessPageWSParams = {
             lessonid: lessonId,
             pageid: pageId,
-            data: CoreUtils.objectToArrayOfObjects<ProcessPageData>(data, 'name', 'value', true),
+            data: CoreObject.toArrayOfObjects<ProcessPageData>(data, 'name', 'value', true),
             review: !!options.review,
         };
 
-        if (typeof options.password == 'string') {
+        if (typeof options.password === 'string') {
             params.password = options.password;
         }
 
@@ -3211,15 +3190,18 @@ export class AddonModLessonProvider {
             }
 
             // Check if "number of attempts remaining" message is needed.
-            if (!result.correctanswer && !result.newpageid) {
+            if (!result.correctanswer) {
                 // Retreive the number of attempts left counter.
-                if (lesson.maxattempts && lesson.maxattempts > 0 && nAttempts >= lesson.maxattempts) {
+                if (!result.newpageid && lesson.maxattempts && lesson.maxattempts > 0 && nAttempts >= lesson.maxattempts) {
                     if (lesson.maxattempts > 1) { // Don't bother with message if only one attempt.
                         result.maxattemptsreached = true;
                     }
                     result.newpageid =  AddonModLessonJumpTo.NEXTPAGE;
                 } else if (lesson.maxattempts && lesson.maxattempts > 1) { // Don't show message if only one attempt or unlimited.
                     result.attemptsremaining = lesson.maxattempts - nAttempts;
+                    if (result.attemptsremaining <= 0) {
+                        result.maxattemptsreached = true;
+                    }
                 }
             }
         }
@@ -3408,7 +3390,7 @@ export type AddonModLessonCheckAnswerResult = {
     feedback?: string;
     nodefaultresponse?: boolean;
     inmediatejump?: boolean;
-    studentanswerformat?: number;
+    studentanswerformat?: CoreTextFormat;
     useranswer?: unknown;
 };
 
@@ -3685,7 +3667,8 @@ export type AddonModLessonLessonWSData = {
     coursemodule: number; // Course module id.
     name: string; // Lesson name.
     intro?: string; // Lesson introduction text.
-    introformat?: number; // Intro format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    introformat?: CoreTextFormat; // Intro format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    lang: string; // Forced activity language.
     practice?: boolean; // Practice lesson?.
     modattempts?: boolean; // Allow student review?.
     usepassword?: boolean; // Password protected lesson?.
@@ -3723,26 +3706,8 @@ export type AddonModLessonLessonWSData = {
     completionendreached?: number; // Require end reached for completion?.
     completiontimespent?: number; // Student must do this activity at least for.
     allowofflineattempts: boolean; // Whether to allow the lesson to be attempted offline in the mobile app.
-    introfiles?: { // Introfiles.
-        filename?: string; // File name.
-        filepath?: string; // File path.
-        filesize?: number; // File size.
-        fileurl: string; // Downloadable file url.
-        timemodified?: number; // Time modified.
-        mimetype?: string; // File mime type.
-        isexternalfile?: number; // Whether is an external file.
-        repositorytype?: string; // The repository type for the external files.
-    }[];
-    mediafiles?: { // Mediafiles.
-        filename?: string; // File name.
-        filepath?: string; // File path.
-        filesize?: number; // File size.
-        fileurl: string; // Downloadable file url.
-        timemodified?: number; // Time modified.
-        mimetype?: string; // File mime type.
-        isexternalfile?: number; // Whether is an external file.
-        repositorytype?: string; // The repository type for the external files.
-    }[];
+    introfiles?: CoreWSExternalFile[]; // Introfiles.
+    mediafiles?: CoreWSExternalFile[]; // Mediafiles.
 };
 
 /**
@@ -3804,7 +3769,7 @@ export type AddonModLessonPageWSData = {
     timemodified: number; // Timestamp for when the page was last modified.
     title?: string; // The title of this page.
     contents?: string; // The contents of this page.
-    contentsformat?: number; // Contents format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    contentsformat?: CoreTextFormat; // Contents format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
     displayinmenublock: boolean; // Toggles display in the left menu block.
     type: AddonModLessonPageType; // The type of the page [question | structure].
     typeid: number; // The unique identifier for the page type.
@@ -3825,9 +3790,9 @@ export type AddonModLessonPageAnswerWSData = {
     timecreated?: number; // A timestamp of when the answer was created.
     timemodified?: number; // A timestamp of when the answer was modified.
     answer?: string; // Possible answer text.
-    answerformat?: number; // Answer format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    answerformat?: CoreTextFormat; // Answer format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
     response?: string; // Response text for the answer.
-    responseformat?: number; // Response format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    responseformat?: CoreTextFormat; // Response format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
 };
 
 /**
@@ -4058,7 +4023,7 @@ export type AddonModLessonUserAttemptAnswerPageWSData = {
 export type AddonModLessonUserAttemptAnswerData = {
     score: string; // The score (text version).
     response: string; // The response text.
-    responseformat: number; // Response. format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    responseformat: CoreTextFormat; // Response. format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
     answers?: string[][]; // User answers.
 };
 

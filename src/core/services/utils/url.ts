@@ -15,10 +15,11 @@
 import { Injectable } from '@angular/core';
 
 import { makeSingleton } from '@singletons';
-import { CoreUrl, CoreUrlParams as CoreUrlParamsNew, CoreUrlPartNames } from '@singletons/url';
+import { CoreUrl, CoreUrlParams as CoreUrlParamsNew, CoreUrlPartNames } from '@static/url';
 
-/*
+/**
  * "Utils" service with helper functions for URLs.
+ *
  * @deprecated since 4.5. Use CoreUrl instead.
  */
 @Injectable({ providedIn: 'root' })
@@ -46,7 +47,7 @@ export class CoreUrlUtilsProvider {
      * @deprecated since 4.5. Use CoreUrl.addParamsToUrl instead.
      */
     addParamsToUrl(url: string, params?: Record<string, unknown>, anchor?: string, boolToNumber?: boolean): string {
-        return CoreUrl.addParamsToUrl(url, params, anchor, boolToNumber);
+        return CoreUrl.addParamsToUrl(url, params, { anchor, boolToNumber });
     }
 
     /**
@@ -124,8 +125,8 @@ export class CoreUrlUtilsProvider {
      *
      * @deprecated since 4.5. You can use CoreAuthenticatedSite.getDocsUrl but is also deprecated.
      */
-    async getDocsUrl(release?: string, page: string = 'Mobile_app'): Promise<string> {
-        return 'https://docs.moodle.org/en/' + page;
+    async getDocsUrl(release?: string, page = 'Mobile_app'): Promise<string> {
+        return `https://docs.moodle.org/en/${page}`;
     }
 
     /**
@@ -246,6 +247,7 @@ export class CoreUrlUtilsProvider {
      * Check whether a URL scheme belongs to a local file.
      *
      * @param scheme Scheme to check.
+     * @param domain Domain to check.
      * @returns Whether the scheme belongs to a local file.
      * @deprecated since 4.5. Use CoreUrl.isLocalFileUrlScheme instead.
      */
@@ -335,6 +337,10 @@ export class CoreUrlUtilsProvider {
     }
 
 }
+/**
+ * @deprecated since 4.5. Use CoreUrl instead.
+ */
+// eslint-disable-next-line @typescript-eslint/no-deprecated
 export const CoreUrlUtils = makeSingleton(CoreUrlUtilsProvider);
 
 /**

@@ -38,7 +38,11 @@ export class QRScanner {
     prepare(): Promise<QRScannerStatus> {
         return new Promise((resolve, reject) => {
             window.QRScanner.prepare((error: QRScannerError, status: QRScannerStatus) => {
-                error ? reject(error) : resolve(status);
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(status);
+                }
             });
         });
     }
@@ -61,7 +65,11 @@ export class QRScanner {
     scan(): Observable<string> {
         return new Observable(observer => {
             window.QRScanner.scan((error: QRScannerError, text: string) => {
-                error ? observer.error(error) : observer.next(text);
+                if (error) {
+                    observer.error(error);
+                } else {
+                    observer.next(text);
+                }
             });
 
             return () => {
@@ -87,7 +95,11 @@ export class QRScanner {
     enableLight(): Promise<QRScannerStatus> {
         return new Promise((resolve, reject) => {
             window.QRScanner.enableLight((error: QRScannerError, status: QRScannerStatus) => {
-                error ? reject(error) : resolve(status);
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(status);
+                }
             });
         });
     }
@@ -100,7 +112,11 @@ export class QRScanner {
     disableLight(): Promise<QRScannerStatus> {
         return new Promise((resolve, reject) => {
             window.QRScanner.disableLight((error: QRScannerError, status: QRScannerStatus) => {
-                error ? reject(error) : resolve(status);
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(status);
+                }
             });
         });
     }
@@ -113,7 +129,11 @@ export class QRScanner {
     useFrontCamera(): Promise<QRScannerStatus> {
         return new Promise((resolve, reject) => {
             window.QRScanner.useFrontCamera((error: QRScannerError, status: QRScannerStatus) => {
-                error ? reject(error) : resolve(status);
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(status);
+                }
             });
         });
     }
@@ -126,7 +146,11 @@ export class QRScanner {
     useBackCamera(): Promise<QRScannerStatus> {
         return new Promise((resolve, reject) => {
             window.QRScanner.useBackCamera((error: QRScannerError, status: QRScannerStatus) => {
-                error ? reject(error) : resolve(status);
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(status);
+                }
             });
         });
     }
@@ -140,7 +164,11 @@ export class QRScanner {
     useCamera(camera: QRScannerCamera): Promise<QRScannerStatus> {
         return new Promise((resolve, reject) => {
             window.QRScanner.useCamera(camera, (error: QRScannerError, status: QRScannerStatus) => {
-                error ? reject(error) : resolve(status);
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(status);
+                }
             });
         });
     }
@@ -182,6 +210,21 @@ export class QRScanner {
 }
 
 export enum QRScannerCamera {
-    FRONT_CAMERA = 0,
-    BACK_CAMERA = 1,
+    BACK_CAMERA = 0,
+    FRONT_CAMERA = 1,
+}
+
+export enum QRScannerErrorCode {
+    UNEXPECTED_ERROR = 0, // An unexpected error. Returned only by bugs in QRScanner.
+    CAMERA_ACCESS_DENIED = 1, // The user denied camera access.
+    CAMERA_ACCESS_RESTRICTED = 2, // Camera access is restricted (due to parental controls,
+                                  // organization security configuration profiles, or similar reasons).
+    BACK_CAMERA_UNAVAILABLE = 3, // The back camera is unavailable.
+    FRONT_CAMERA_UNAVAILABLE = 4, // The front camera is unavailable.
+    CAMERA_UNAVAILABLE = 5, // The camera is unavailable because it doesn't exist or is otherwise unable to be configured.
+                            // (Also returned if QRScanner cannot return one of the more specific BACK_CAMERA_UNAVAILABLE
+                            // or FRONT_CAMERA_UNAVAILABLE errors.)
+    SCAN_CANCELED = 6, // Scan was canceled by the cancelScan() method. (Returned exclusively to the QRScanner.scan() method.)
+    LIGHT_UNAVAILABLE = 7, // The device light is unavailable because it doesn't exist or is otherwise unable to be configured.
+    OPEN_SETTINGS_UNAVAILABLE = 8, // The device is unable to open settings.
 }

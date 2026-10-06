@@ -14,7 +14,7 @@
 
 import { Injectable } from '@angular/core';
 import { CoreSites } from '@services/sites';
-import { CoreTimeUtils } from '@services/utils/time';
+import { CoreTime } from '@static/time';
 import { makeSingleton } from '@singletons';
 import { COMMENTS_TABLE, COMMENTS_DELETED_TABLE, CoreCommentsDBRecord, CoreCommentsDeletedDBRecord } from './database/comments';
 import { ContextLevel } from '@/core/constants';
@@ -57,7 +57,7 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<CoreCommentsDBRecord | undefined> {
         try {
@@ -91,7 +91,7 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<(CoreCommentsDBRecord | CoreCommentsDeletedDBRecord)[]> {
         let comments: (CoreCommentsDBRecord | CoreCommentsDeletedDBRecord)[] = [];
@@ -136,7 +136,7 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<CoreCommentsDeletedDBRecord[]> {
         try {
@@ -170,7 +170,7 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -200,7 +200,7 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -232,11 +232,11 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<CoreCommentsDBRecord> {
         const site = await CoreSites.getSite(siteId);
-        const now = CoreTimeUtils.timestamp();
+        const now = CoreTime.timestamp();
         const data: CoreCommentsDBRecord = {
             contextlevel: contextLevel,
             instanceid: instanceId,
@@ -270,11 +270,11 @@ export class CoreCommentsOfflineProvider {
         instanceId: number,
         component: string,
         itemId: number,
-        area: string = '',
+        area = '',
         siteId?: string,
     ): Promise<void> {
         const site = await CoreSites.getSite(siteId);
-        const now = CoreTimeUtils.timestamp();
+        const now = CoreTime.timestamp();
         const data: CoreCommentsDeletedDBRecord = {
             contextlevel: contextLevel,
             instanceid: instanceId,

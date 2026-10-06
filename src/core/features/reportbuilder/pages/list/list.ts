@@ -19,18 +19,22 @@ import { CoreReportBuilderReportsSource } from '@features/reportbuilder/classes/
 import { CoreReportBuilder, CoreReportBuilderReport, REPORTS_LIST_LIMIT } from '@features/reportbuilder/services/reportbuilder';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
 import { CoreNavigator } from '@services/navigator';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { Translate } from '@singletons';
-import { CoreTime } from '@singletons/time';
+import { CoreTime } from '@static/time';
 import { BehaviorSubject } from 'rxjs';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
 
 @Component({
     selector: 'core-report-builder-list',
     templateUrl: './list.html',
     changeDetection: ChangeDetectionStrategy.OnPush,
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
+export default class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
 
     reports!: CoreListItemsManager<CoreReportBuilderReport, CoreReportBuilderReportsSource>;
 
@@ -50,7 +54,7 @@ export class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
             const source = CoreRoutedItemsManagerSourcesTracker.getOrCreateSource(CoreReportBuilderReportsSource, []);
             this.reports = new CoreListItemsManager(source, CoreReportBuilderListPage);
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
             CoreNavigator.back();
         }
     }
@@ -63,7 +67,7 @@ export class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
             await this.fetchReports(true);
             this.updateState({ loaded: true });
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'Error loading reports');
+            CoreAlerts.showError(error, { default: 'Error loading reports' });
 
             this.reports.reset();
         }
@@ -75,7 +79,12 @@ export class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
      * @param reload is reoading or not.
      */
     async fetchReports(reload: boolean): Promise<void> {
-        reload ? await this.reports.reload() : await this.reports.load();
+        if (reload) {
+            await this.reports.reload();
+        } else {
+            await this.reports.load();
+        }
+
         this.updateState({ loadMoreError: false });
 
         this.logView();
@@ -100,7 +109,7 @@ export class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
         try {
             await this.fetchReports(false);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'Error loading more reports');
+            CoreAlerts.showError(error, { default: 'Error loading more reports' });
 
             this.updateState({ loadMoreError: true });
         }
@@ -114,8 +123,8 @@ export class CoreReportBuilderListPage implements AfterViewInit, OnDestroy {
      * @param ionRefresher ionRefresher.
      */
     async refreshReports(ionRefresher?: HTMLIonRefresherElement): Promise<void> {
-        await CoreUtils.ignoreErrors(CoreReportBuilder.invalidateReportsList());
-        await CoreUtils.ignoreErrors(this.fetchReports(true));
+        await CorePromiseUtils.ignoreErrors(CoreReportBuilder.invalidateReportsList());
+        await CorePromiseUtils.ignoreErrors(this.fetchReports(true));
         await ionRefresher?.complete();
     }
 

@@ -16,6 +16,7 @@ import { CoreContentLinksHandlerBase } from './base-handler';
 import { CoreContentLinksAction } from '../services/contentlinks-delegate';
 import { CoreCourseHelper } from '@features/course/services/course-helper';
 import { CoreNavigationOptions } from '@services/navigator';
+import { CORE_COURSE_MODULE_FEATURE_PREFIX } from '@features/course/constants';
 
 /**
  * Handler to handle URLs pointing to the index of a module.
@@ -44,11 +45,11 @@ export class CoreContentLinksModuleIndexHandler extends CoreContentLinksHandlerB
 
         // Match the view.php URL with an id or instance id param.
         const pattern = instanceIdParam ?
-            '/mod/' + modName + '/view.php.*([&?](' + instanceIdParam + '|id)=\\d+)' :
-            '/mod/' + modName + '/view.php.*([&?]id=\\d+)';
+            `/mod/${modName}/view.php.*([&?](${instanceIdParam}|id)=\\d+)` :
+            `/mod/${modName}/view.php.*([&?]id=\\d+)`;
 
         this.pattern = new RegExp(pattern);
-        this.featureName = 'CoreCourseModuleDelegate_' + addon;
+        this.featureName = CORE_COURSE_MODULE_FEATURE_PREFIX + addon;
     }
 
     /**
@@ -66,13 +67,7 @@ export class CoreContentLinksModuleIndexHandler extends CoreContentLinksHandlerB
     }
 
     /**
-     * Get the list of actions for a link (url).
-     *
-     * @param siteIds List of sites the URL belongs to.
-     * @param url The URL to treat.
-     * @param params The params of the URL. E.g. 'mysite.com?id=1' -> {id: 1}
-     * @param courseId Course ID related to the URL. Optional but recommended.
-     * @returns List of (or promise resolved with list of) actions.
+     * @inheritdoc
      */
     getActions(
         siteIds: string[],

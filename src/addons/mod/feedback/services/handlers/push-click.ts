@@ -16,10 +16,11 @@ import { Injectable } from '@angular/core';
 import { CoreCourseHelper } from '@features/course/services/course-helper';
 import { CorePushNotificationsClickHandler } from '@features/pushnotifications/services/push-delegate';
 import { CorePushNotificationsNotificationBasicData } from '@features/pushnotifications/services/pushnotifications';
-import { CoreUrl } from '@singletons/url';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUrl } from '@static/url';
+import { CoreUtils } from '@static/utils';
 import { makeSingleton } from '@singletons';
 import { AddonModFeedbackHelper } from '../feedback-helper';
+import { ADDON_MOD_FEEDBACK_FEATURE_NAME } from '../../constants';
 
 /**
  * Handler for feedback push notifications clicks.
@@ -29,7 +30,7 @@ export class AddonModFeedbackPushClickHandlerService implements CorePushNotifica
 
     name = 'AddonModFeedbackPushClickHandler';
     priority = 200;
-    featureName = 'CoreCourseModuleDelegate_AddonModFeedback';
+    featureName = ADDON_MOD_FEEDBACK_FEATURE_NAME;
 
     /**
      * @inheritdoc

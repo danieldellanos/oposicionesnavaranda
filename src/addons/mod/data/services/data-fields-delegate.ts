@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Injectable, Type } from '@angular/core';
+import { Injectable, Type, inject } from '@angular/core';
 import { CoreDelegate, CoreDelegateHandler } from '@classes/delegate';
 import { AddonModDataDefaultFieldHandler } from './handlers/default-field';
 import { makeSingleton } from '@singletons';
@@ -21,7 +21,7 @@ import { AddonModDataEntryField,
     AddonModDataSearchEntriesAdvancedFieldFormatted,
     AddonModDataSubfieldData,
 } from './data';
-import { CoreFormFields } from '@singletons/form';
+import { CoreFormFields } from '@static/form';
 import { FileEntry } from '@awesome-cordova-plugins/file/ngx';
 import { CoreFileEntry } from '@services/file-helper';
 import type { AddonModDataFieldPluginBaseComponent } from '@addons/mod/data/classes/base-field-plugin-component';
@@ -42,10 +42,10 @@ export interface AddonModDataFieldHandler extends CoreDelegateHandler {
      * Return the Component to use to display the plugin data.
      * It's recommended to return the class of the component, but you can also return an instance of the component.
      *
-     * @param field The field object.
+     * @param plugin The field plugin object.
      * @returns The component to use, undefined if not found.
      */
-    getComponent?(plugin: AddonModDataField): Type<AddonModDataFieldPluginBaseComponent> | undefined;
+    getComponent?(plugin: AddonModDataField): Promise<Type<AddonModDataFieldPluginBaseComponent> | undefined>;
 
     /**
      * Get field search data in the input data.
@@ -111,10 +111,10 @@ export interface AddonModDataFieldHandler extends CoreDelegateHandler {
     /**
      * Override field content data with offline submission.
      *
-     * @param originalContent Original data to be overriden.
+     * @param originalContent Original data to be overridden.
      * @param offlineContent Array with all the offline data to override.
      * @param offlineFiles Array with all the offline files in the field.
-     * @returns Data overriden
+     * @returns Data overridden
      */
     overrideData?(
         originalContent: AddonModDataEntryField,
@@ -130,12 +130,7 @@ export interface AddonModDataFieldHandler extends CoreDelegateHandler {
 export class AddonModDataFieldsDelegateService extends CoreDelegate<AddonModDataFieldHandler> {
 
     protected handlerNameProperty = 'type';
-
-    constructor(
-        protected defaultHandler: AddonModDataDefaultFieldHandler,
-    ) {
-        super('AddonModDataFieldsDelegate');
-    }
+    protected defaultHandler = inject(AddonModDataDefaultFieldHandler);
 
     /**
      * @inheritdoc
@@ -252,10 +247,10 @@ export class AddonModDataFieldsDelegateService extends CoreDelegate<AddonModData
      * Override field content data with offline submission.
      *
      * @param field Defines the field to be rendered.
-     * @param originalContent Original data to be overriden.
+     * @param originalContent Original data to be overridden.
      * @param offlineContent Array with all the offline data to override.
      * @param offlineFiles Array with all the offline files in the field.
-     * @returns Data overriden
+     * @returns Data overridden
      */
     overrideData(
         field: AddonModDataField,

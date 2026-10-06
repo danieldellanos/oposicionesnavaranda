@@ -13,13 +13,16 @@
 // limitations under the License.
 
 import {
-    Component,
-    Input,
-    Output,
-    EventEmitter,
-    ChangeDetectionStrategy,
+  Component,
+  ChangeDetectionStrategy,
+  input,
+  model,
 } from '@angular/core';
 import { CoreGroupInfo } from '@services/groups';
+import { CoreBaseModule } from '@/core/base.module';
+import { CoreFaIconDirective } from '@directives/fa-icon';
+import { CoreFormatTextDirective } from '@directives/format-text';
+import { CoreAlertCardComponent } from '@components/alert-card/alert-card';
 
 /**
  * Component to display a group selector.
@@ -29,13 +32,18 @@ import { CoreGroupInfo } from '@services/groups';
     templateUrl: 'group-selector.html',
     styleUrl: 'group-selector.scss',
     changeDetection: ChangeDetectionStrategy.OnPush,
+    imports: [
+        CoreBaseModule,
+        CoreFaIconDirective,
+        CoreFormatTextDirective,
+        CoreAlertCardComponent,
+    ],
 })
 export class CoreGroupSelectorComponent {
 
-    @Input() groupInfo?: CoreGroupInfo;
-    @Input() multipleGroupsMessage?: string;
-    @Input({ required: true }) selected!: number;
-    @Input() courseId?: number;
-    @Output() selectedChange = new EventEmitter<number>();
+    readonly groupInfo = input<CoreGroupInfo>();
+    readonly multipleGroupsMessage = input<string>();
+    readonly selected = model.required<number>();
+    readonly courseId = input<number>();
 
 }

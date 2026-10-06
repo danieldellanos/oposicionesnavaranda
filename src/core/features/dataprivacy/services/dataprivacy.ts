@@ -19,6 +19,7 @@ import { CoreUserSummary } from '@features/user/services/user';
 import { CoreSites, CoreSitesCommonWSOptions } from '@services/sites';
 import { CoreWSExternalWarning } from '@services/ws';
 import { makeSingleton } from '@singletons';
+import { CoreTextFormat } from '@static/text';
 
 /**
  * Service to handle data privacy.
@@ -31,10 +32,11 @@ export class CoreDataPrivacyService {
     /**
      * Check if data privacy is enabled on current site.
      *
+     * @param siteId Site ID. If not defined, current site.
      * @returns Whether data privacy is enabled.
      */
-    async isEnabled(): Promise<boolean> {
-        const site = CoreSites.getCurrentSite();
+    async isEnabled(siteId?: string): Promise<boolean> {
+        const site = await CoreSites.getSite(siteId);
 
         // Check if the privacy data WS are available in the site.
         if (!site?.wsAvailable('tool_dataprivacy_get_data_requests')) {
@@ -42,7 +44,7 @@ export class CoreDataPrivacyService {
         }
 
         // If the user can contact the DPO, then data privacy is enabled.
-        const accessInformation = await this.getAccessInformation();
+        const accessInformation = await this.getAccessInformation({ siteId: site.id });
 
         return accessInformation.cancontactdpo;
     }
@@ -53,7 +55,7 @@ export class CoreDataPrivacyService {
      * @returns Cache key.
      */
     protected getAccessInformationCacheKey(): string {
-        return CoreDataPrivacyService.ROOT_CACHE_KEY + 'accessInformation';
+        return `${CoreDataPrivacyService.ROOT_CACHE_KEY}accessInformation`;
     }
 
     /**
@@ -80,7 +82,6 @@ export class CoreDataPrivacyService {
      * Invalidates access information.
      *
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     protected async invalidateAccessInformation(siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -116,7 +117,7 @@ export class CoreDataPrivacyService {
      * @returns Cache key.
      */
     protected getDataRequestsCacheKey(): string {
-        return CoreDataPrivacyService.ROOT_CACHE_KEY + 'datarequests';
+        return `${CoreDataPrivacyService.ROOT_CACHE_KEY}datarequests`;
     }
 
     /**
@@ -150,7 +151,6 @@ export class CoreDataPrivacyService {
      * Invalidate data requests.
      *
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateDataRequests(siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -350,13 +350,13 @@ type CoreDataPrivacyGetDataRequestsWSResponse = {
 export type CoreDataPrivacyRequest = {
     type: CoreDataPrivacyDataRequestType; // Type.
     comments: string; // Comments.
-    commentsformat: number; // Commentsformat.
+    commentsformat: CoreTextFormat; // Commentsformat.
     userid: number; // Userid.
     requestedby: number; // Requestedby.
     status: CoreDataPrivacyDataRequestStatus; // Status.
     dpo: number; // Dpo.
     dpocomment: string; // Dpocomment.
-    dpocommentformat: number; // Dpocommentformat.
+    dpocommentformat: CoreTextFormat; // Dpocommentformat.
     systemapproved: boolean; // Systemapproved.
     creationmethod: number; // Creationmethod.
     id: number; // Id.

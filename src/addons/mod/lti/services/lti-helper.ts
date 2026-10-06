@@ -18,12 +18,12 @@ import { CoreCourse } from '@features/course/services/course';
 import { CoreCourseModuleData } from '@features/course/services/course-helper';
 import { CorePlatform } from '@services/platform';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { makeSingleton } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { makeSingleton, Translate } from '@singletons';
+import { CoreEvents } from '@static/events';
 import { AddonModLti, AddonModLtiLti } from './lti';
 import { CoreAnalytics, CoreAnalyticsEventType } from '@services/analytics';
-import { CoreLoadings } from '@services/loadings';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CoreAlerts } from '@services/overlays/alerts';
 
 /**
  * Service that provides some helper functions for LTI.
@@ -31,7 +31,7 @@ import { CoreLoadings } from '@services/loadings';
 @Injectable({ providedIn: 'root' })
 export class AddonModLtiHelperProvider {
 
-    protected pendingCheckCompletion: {[moduleId: string]: {courseId: number; module: CoreCourseModuleData}} = {};
+    protected pendingCheckCompletion: { [moduleId: string]: { courseId: number; module: CoreCourseModuleData } } = {};
 
     constructor() {
         // Clear pending completion on logout.
@@ -93,7 +93,7 @@ export class AddonModLtiHelperProvider {
             // Launch LTI.
             return AddonModLti.launch(launchData.endpoint, launchData.parameters);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.mod_lti.errorgetlti', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.mod_lti.errorgetlti') });
         } finally {
             modal.dismiss();
         }

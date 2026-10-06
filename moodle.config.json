@@ -1,8 +1,8 @@
 {
     "app_id": "com.oposicionesnavaranda.mobile",
     "appname": "OposicionesNavaranda",
-    "versioncode": 45100,
-    "versionname": "4.5.1",
+    "versioncode": 52100,
+    "versionname": "5.2.1",
     "cache_update_frequency_usually": 420000,
     "cache_update_frequency_often": 1200000,
     "cache_update_frequency_sometimes": 3600000,
@@ -91,9 +91,9 @@
     "privacypolicy": "https://oposicionesnavaranda.es/politica-de-privacidad/",
     "notificoncolor": "#3ca4b6",
     "enableanalytics": false,
-    "enableonboarding": true,
     "forceColorScheme": "",
     "forceLoginLogo": false,
+    "showTopLogo": "offline",
     "ioswebviewscheme": "moodleappfs",
     "appstores": {
         "android": "com.oposicionesnavaranda.mobile",
@@ -130,5 +130,6 @@
             ]
         }
     },
-    "clearIABSessionWhenAutoLogin": "android"
+    "clearIABSessionWhenAutoLogin": "android",
+    "collapsibleItemsExpanded": false
 }

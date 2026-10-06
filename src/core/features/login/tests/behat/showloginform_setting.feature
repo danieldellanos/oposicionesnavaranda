@@ -1,4 +1,4 @@
-@core_login @app @javascript @lms_from4.5
+@app_parallel_run_login @core_login @app @javascript @lms_from4.5
 Feature: Test showloginform setting in the app
 
   Background:
@@ -25,6 +25,7 @@ Feature: Test showloginform setting in the app
     Then the header should be "Reconnect" in the app
     And I should not find "Log in" "ion-button" in the app
     And I replace "/.*/" within ".core-siteurl" with "https://campus.example.edu"
+    And I wait "1" seconds
     And the UI should match the snapshot
 
   Scenario: Login with forced developer option
@@ -48,7 +49,7 @@ Feature: Test showloginform setting in the app
     And I press "Moodle Mobile" in the app
     And I press "Developer options" in the app
     And I press "Always show login form" in the app
-    And I go back 4 times in the app
+    And I go back to the root page in the app
     And I press "david student" in the app
     Then the header should be "Reconnect" in the app
     And I should find "Log in" "ion-button" in the app

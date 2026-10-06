@@ -1,4 +1,4 @@
-@core_user @app @javascript
+@app_parallel_run_user @core_user @app @core @javascript
 Feature: Test basic usage of user features
 
   Background:
@@ -7,6 +7,7 @@ Feature: Test basic usage of user features
       | username | firstname | lastname | timezone |
       | student1 | Student   | Student  | 99       |
 
+  @lms_from4.5
   Scenario: Complete missing fields
     Given the following "custom profile fields" exist:
       | datatype | shortname  | name           | required | param1 |
@@ -44,7 +45,7 @@ Feature: Test basic usage of user features
     And I set the field "password" to "student1"
     And I click on "Log in" "button"
     And I set the field "Favourite food" to "Pasta"
-    And I set the field "Web page" to "https://moodle.com"
+    And I set the field "Website" to "https://moodle.com"
     And I click on "Update profile" "button"
     Then I should see "Changes saved"
 
@@ -55,19 +56,21 @@ Feature: Test basic usage of user features
     When I press "Reconnect" in the app
     Then I should find "Acceptance test site" in the app
 
+  @lms_from4.5
   Scenario: View profile
     Given the following "custom profile fields" exist:
       | datatype | shortname  | name           | required | param1 |
       | text     | food       | Favourite food | 1        |        |
       | social   | website    | url            | 1        | url    |
-    And I entered the app as "student1"
+    When I enter the app
+    And I log in as "student1"
     And I press "Complete profile" in the app
     And I switch to the browser tab opened by the app
     And I set the field "username" to "student1"
     And I set the field "password" to "student1"
     And I click on "Log in" "button"
     And I set the field "Favourite food" to "Pasta"
-    And I set the field "Web page" to "https://moodle.com"
+    And I set the field "Website" to "https://moodle.com"
     When I click on "Update profile" "button"
     Then I should see "Changes saved"
 
@@ -108,3 +111,23 @@ Feature: Test basic usage of user features
     And I press "Details" in the app
     Then I should find "Asia/Shanghai" in the app
     And I should not find "Europe/Madrid" in the app
+
+  @lms_from4.2
+  Scenario: View hidden profile when access is restricted
+    Given the following "users" exist:
+      | username | firstname | lastname |
+      | student2 | Hidden    | User     |
+    And the following "courses" exist:
+      | fullname | shortname |
+      | Course 1 | C1        |
+    And the following "course enrolments" exist:
+      | user     | course | role    |
+      | student1 | C1     | student |
+      | student2 | C1     | student |
+    And I entered the course "Course 1" as "student1" in the app
+    When I press "Participants" in the app
+    And the following "permission overrides" exist:
+      | capability            | permission | role    | contextlevel | reference |
+      | moodle/user:viewdetails | Prevent    | student | Course       | C1        |
+    And I press "Hidden User" in the app
+    Then I should find "This profile is limited" in the app

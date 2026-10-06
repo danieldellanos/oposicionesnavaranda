@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnInit, Optional } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
 import { CoreCourseModuleMainActivityComponent } from '@features/course/classes/main-activity-component';
-import { CoreCourseContentsPage } from '@features/course/pages/contents/contents';
-import { IonContent } from '@ionic/angular';
 import { CoreApp } from '@services/app';
 import { CoreGroupInfo, CoreGroups } from '@services/groups';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreText } from '@singletons/text';
-import { CoreTimeUtils } from '@services/utils/time';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreText } from '@static/text';
+import { CoreTime } from '@static/time';
+import type { CoreCourseModuleDate } from '@features/course/services/course';
+import { CoreArray } from '@static/array';
 import { Translate } from '@singletons';
 import {
     AddonModBBB,
@@ -31,9 +29,17 @@ import {
     AddonModBBBMeetingInfo,
     AddonModBBBRecordingPlaybackTypes,
 } from '../../services/bigbluebuttonbn';
-import { ADDON_MOD_BBB_COMPONENT } from '../../constants';
-import { CoreLoadings } from '@services/loadings';
+import { ADDON_MOD_BBB_COMPONENT_LEGACY, ADDON_MOD_BBB_MODNAME } from '../../constants';
+import { CoreLoadings } from '@services/overlays/loadings';
 import { convertTextToHTMLElement } from '@/core/utils/create-html-element';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreOpener } from '@static/opener';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreToasts, ToastDuration } from '@services/overlays/toasts';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreCourseModuleInfoComponent } from '@features/course/components/module-info/module-info';
+import { CoreCourseModuleNavigationComponent } from '@features/course/components/module-navigation/module-navigation';
+import { CoreUrl } from '@static/url';
 
 /**
  * Component that displays a Big Blue Button activity.
@@ -41,24 +47,44 @@ import { convertTextToHTMLElement } from '@/core/utils/create-html-element';
 @Component({
     selector: 'addon-mod-bbb-index',
     templateUrl: 'index.html',
-    styleUrls: ['index.scss'],
+    styleUrl: 'index.scss',
+    imports: [
+        CoreSharedModule,
+        CoreCourseModuleInfoComponent,
+        CoreCourseModuleNavigationComponent,
+    ],
 })
 export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityComponent implements OnInit {
 
-    component = ADDON_MOD_BBB_COMPONENT;
-    pluginName = 'bigbluebuttonbn';
-    bbb?: AddonModBBBData;
-    groupInfo?: CoreGroupInfo;
-    groupId = 0;
-    meetingInfo?: AddonModBBBMeetingInfo;
-    recordings?: Recording[];
+    component = ADDON_MOD_BBB_COMPONENT_LEGACY;
+    pluginName = ADDON_MOD_BBB_MODNAME;
 
-    constructor(
-        protected content?: IonContent,
-        @Optional() courseContentsPage?: CoreCourseContentsPage,
-    ) {
-        super('AddonModBBBIndexComponent', content, courseContentsPage);
-    }
+    readonly bbb = signal<AddonModBBBData | undefined>(undefined);
+    readonly groupInfo = signal<CoreGroupInfo | undefined>(undefined);
+    readonly groupId = signal(0);
+    readonly meetingInfo = signal<AddonModBBBMeetingInfo | undefined>(undefined);
+    readonly recordings = signal<Recording[] | undefined>(undefined);
+    readonly isRefreshingMeetingInfo = signal(false);
+    readonly moderatorHasJoined = signal(false);
+
+    readonly showRoom = computed(() => {
+        const meetingInfo = this.meetingInfo();
+
+        return !!meetingInfo && (!meetingInfo.features || !!meetingInfo.features.showroom);
+    });
+
+    readonly showRecordings = computed(() => {
+        const meetingInfo = this.meetingInfo();
+
+        return !!meetingInfo && (!meetingInfo.features || !!meetingInfo.features.showrecordings);
+    });
+
+    readonly userLimitReached = computed(() => {
+        const meetingInfo = this.meetingInfo();
+
+        return !!meetingInfo && !!meetingInfo.statusrunning && meetingInfo.userlimit > 0 &&
+            ((meetingInfo.participantcount || 0) + (meetingInfo.moderatorcount || 0)) >= meetingInfo.userlimit;
+    });
 
     /**
      * @inheritdoc
@@ -69,28 +95,24 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
         await this.loadContent();
     }
 
-    get showRoom(): boolean {
-        return !!this.meetingInfo && (!this.meetingInfo.features || this.meetingInfo.features.showroom);
-    }
-
-    get showRecordings(): boolean {
-        return !!this.meetingInfo && (!this.meetingInfo.features || this.meetingInfo.features.showrecordings);
-    }
-
     /**
      * @inheritdoc
      */
     protected async fetchContent(): Promise<void> {
-        this.bbb = await AddonModBBB.getBBB(this.courseId, this.module.id);
+        this.moderatorHasJoined.set(false);
 
-        this.description = this.bbb.intro;
-        this.dataRetrieved.emit(this.bbb);
+        const bbb = await AddonModBBB.getBBB(this.courseId, this.module.id);
+        this.bbb.set(bbb);
 
-        this.groupInfo = await CoreGroups.getActivityGroupInfo(this.module.id, false);
+        this.description = bbb.intro;
+        this.dataRetrieved.emit(bbb);
 
-        this.groupId = CoreGroups.validateGroupId(this.groupId, this.groupInfo);
+        const groupInfo = await CoreGroups.getActivityGroupInfo(this.module.id, false);
+        this.groupInfo.set(groupInfo);
 
-        if (this.groupInfo.separateGroups && !this.groupInfo.groups.length) {
+        this.groupId.set(CoreGroups.validateGroupId(this.groupId(), groupInfo));
+
+        if (groupInfo.separateGroups && !groupInfo.groups.length) {
             throw new CoreError(Translate.instant('addon.mod_bigbluebuttonbn.view_nojoin'));
         }
 
@@ -106,22 +128,52 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
      * @returns Promise resolved when done.
      */
     async fetchMeetingInfo(updateCache?: boolean): Promise<void> {
-        if (!this.bbb) {
+        const bbb = this.bbb();
+        if (!bbb) {
             return;
         }
 
         try {
-            this.meetingInfo = await AddonModBBB.getMeetingInfo(this.bbb.id, this.groupId, {
+            const meetingInfo = await AddonModBBB.getMeetingInfo(bbb.id, this.groupId(), {
                 cmId: this.module.id,
                 updateCache,
             });
 
-            if (this.meetingInfo.statusrunning && this.meetingInfo.userlimit > 0) {
-                const count = (this.meetingInfo.participantcount || 0) + (this.meetingInfo.moderatorcount || 0);
-                if (count === this.meetingInfo.userlimit) {
-                    this.meetingInfo.statusmessage = Translate.instant('addon.mod_bigbluebuttonbn.userlimitreached');
+            this.setStatusMessage(meetingInfo);
+
+            // If the module doesn't include activity dates, populate them from meetingInfo.
+            // As of LMS v5.1.0, these dates are normally provided by the module.
+            if (this.module && (!this.module.dates || !this.module.dates.length)) {
+                const site = CoreSites.getCurrentSite();
+                if (site && !site.isVersionGreaterEqualThan('5.1')) {
+                    const dates: CoreCourseModuleDate[] = [];
+                    const now = CoreTime.timestamp();
+
+                    if (meetingInfo.openingtime) {
+                        const openLabelId = meetingInfo.openingtime > now ? 'activitydate:opens' : 'activitydate:opened';
+                        dates.push({
+                            dataid: 'timeopen',
+                            label: Translate.instant(`core.course.${openLabelId}`),
+                            timestamp: meetingInfo.openingtime,
+                        });
+                    }
+
+                    if (meetingInfo.closingtime) {
+                        const closeLabelId = meetingInfo.closingtime > now ? 'activitydate:closes' : 'activitydate:closed';
+                        dates.push({
+                            dataid: 'timeclose',
+                            label: Translate.instant(`core.course.${closeLabelId}`),
+                            timestamp: meetingInfo.closingtime,
+                        });
+                    }
+
+                    if (dates.length) {
+                        this.module.dates = dates;
+                    }
                 }
             }
+
+            this.meetingInfo.set(meetingInfo);
         } catch (error) {
             if (error && error.errorcode === 'restrictedcontextexception') {
                 error.message = Translate.instant('addon.mod_bigbluebuttonbn.view_nojoin');
@@ -132,21 +184,52 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
     }
 
     /**
+     * Change the status message of the meeting info if needed.
+     *
+     * @param meetingInfo Meeting info to change its status message if needed.
+     */
+    protected setStatusMessage(meetingInfo: AddonModBBBMeetingInfo): void {
+        // User limit wasn't calculated properly before MDL-76303 (4.0.8, 4.1.3).
+        if (this.userLimitReached()) {
+            meetingInfo.statusmessage = Translate.instant('addon.mod_bigbluebuttonbn.userlimitreached');
+
+            return;
+        }
+
+        // Wait for moderator has more priority than open/close dates, when it shouldn't. See MDL-88273.
+        // Calculate the right status message.
+        if (meetingInfo.openingtime && meetingInfo.openingtime > CoreTime.timestamp()) {
+            meetingInfo.statusmessage = Translate.instant('addon.mod_bigbluebuttonbn.view_message_conference_not_started');
+            meetingInfo.usermustwaittojoin = false;
+
+            return;
+        }
+
+        if (meetingInfo.closingtime && meetingInfo.closingtime < CoreTime.timestamp()) {
+            meetingInfo.statusmessage = Translate.instant('addon.mod_bigbluebuttonbn.view_message_conference_has_ended');
+            meetingInfo.usermustwaittojoin = false;
+
+            return;
+        }
+    }
+
+    /**
      * Get recordings.
      *
      * @returns Promise resolved when done.
      */
     async fetchRecordings(): Promise<void> {
-        if (!this.bbb || !this.showRecordings) {
+        const bbb = this.bbb();
+        if (!bbb || !this.showRecordings()) {
             return;
         }
 
-        const recordingsTable = await AddonModBBB.getRecordings(this.bbb.id, this.groupId, {
+        const recordingsTable = await AddonModBBB.getRecordings(bbb.id, this.groupId(), {
             cmId: this.module.id,
         });
-        const columns = CoreUtils.arrayToObject(recordingsTable.columns, 'key');
+        const columns = CoreArray.toObject(recordingsTable.columns, 'key');
 
-        this.recordings = recordingsTable.parsedData.map(recordingData => {
+        const recordings = recordingsTable.parsedData.map(recordingData => {
             const details: RecordingDetail[] = [];
             const playbacksEl = convertTextToHTMLElement(String(recordingData.playback));
             const playbacks: RecordingPlayback[] = Array.from(playbacksEl.querySelectorAll('a')).map(playbackAnchor => ({
@@ -162,7 +245,7 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
                 }
 
                 if (columnData.formatter === 'customDate' && !isNaN(Number(value))) {
-                    value = CoreTimeUtils.userDate(Number(value), 'core.strftimedaydate');
+                    value = CoreTime.userDate(Number(value), 'core.strftimedaydate');
                 } else if (columnData.allowHTML && typeof value === 'string') {
                     // If the HTML is empty, don't display it.
                     const valueElement = convertTextToHTMLElement(value);
@@ -191,8 +274,11 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
                 playbacks,
                 details,
                 expanded: false,
+                timestamp: recordingData.date ? Number(recordingData.date) : undefined,
             };
         });
+
+        this.recordings.set(recordings);
     }
 
     /**
@@ -224,11 +310,12 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
      * @inheritdoc
      */
     protected async logActivity(): Promise<void> {
-        if (!this.bbb) {
+        const bbb = this.bbb();
+        if (!bbb) {
             return; // Shouldn't happen.
         }
 
-        await CoreUtils.ignoreErrors(AddonModBBB.logView(this.bbb.id));
+        await CorePromiseUtils.ignoreErrors(AddonModBBB.logView(bbb.id));
 
         this.analyticsLogEvent('mod_bigbluebuttonbn_view_bigbluebuttonbn');
     }
@@ -240,18 +327,61 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
      * @returns Promise resolved when done.
      */
     async updateMeetingInfo(updateCache?: boolean): Promise<void> {
-        if (!this.bbb) {
+        const bbb = this.bbb();
+        if (!bbb) {
             return;
         }
 
         this.showLoading = true;
 
         try {
-            await AddonModBBB.invalidateAllGroupsMeetingInfo(this.bbb.id);
+            await AddonModBBB.invalidateAllGroupsMeetingInfo(bbb.id);
 
             await this.fetchMeetingInfo(updateCache);
         } finally {
             this.showLoading = false;
+        }
+    }
+
+    /**
+     * Refresh meeting info while in "waiting for moderator" state.
+     */
+    async refreshWaitingMeetingInfo(): Promise<void> {
+        const bbb = this.bbb();
+        if (!bbb || this.isRefreshingMeetingInfo()) {
+            return;
+        }
+
+        this.isRefreshingMeetingInfo.set(true);
+
+        try {
+            await AddonModBBB.invalidateAllGroupsMeetingInfo(bbb.id);
+            await this.fetchMeetingInfo(false);
+
+            const meetingInfo = this.meetingInfo();
+            if (!meetingInfo) {
+                return;
+            }
+
+            if (meetingInfo.canjoin) {
+                await CoreToasts.show({
+                    message: 'addon.mod_bigbluebuttonbn.moderatorhasjoinedshort',
+                    translateMessage: true,
+                    duration: ToastDuration.LONG,
+                });
+
+                this.moderatorHasJoined.set(true);
+            } else if (!this.userLimitReached()){
+                await CoreToasts.show({
+                    message: 'addon.mod_bigbluebuttonbn.stillwaitingformoderator',
+                    translateMessage: true,
+                    duration: ToastDuration.LONG,
+                });
+            }
+        } catch (error) {
+            CoreAlerts.showError(error);
+        } finally {
+            this.isRefreshingMeetingInfo.set(false);
         }
     }
 
@@ -264,9 +394,10 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
         promises.push(AddonModBBB.invalidateBBBs(this.courseId));
         promises.push(CoreGroups.invalidateActivityGroupInfo(this.module.id));
 
-        if (this.bbb) {
-            promises.push(AddonModBBB.invalidateAllGroupsMeetingInfo(this.bbb.id));
-            promises.push(AddonModBBB.invalidateAllGroupsRecordings(this.bbb.id));
+        const bbb = this.bbb();
+        if (bbb) {
+            promises.push(AddonModBBB.invalidateAllGroupsMeetingInfo(bbb.id));
+            promises.push(AddonModBBB.invalidateAllGroupsRecordings(bbb.id));
         }
 
         await Promise.all(promises);
@@ -285,7 +416,7 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
 
             await this.fetchRecordings();
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
         } finally {
             this.showLoading = false;
         }
@@ -300,9 +431,9 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
         const modal = await CoreLoadings.show();
 
         try {
-            const joinUrl = await AddonModBBB.getJoinUrl(this.module.id, this.groupId);
+            const joinUrl = await AddonModBBB.getJoinUrl(this.module.id, this.groupId());
 
-            await CoreUtils.openInBrowser(joinUrl, {
+            await CoreOpener.openInBrowser(joinUrl, {
                 showBrowserWarning: false,
             });
 
@@ -311,7 +442,7 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
 
             this.updateMeetingInfo(true);
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
         } finally {
             modal.dismiss();
         }
@@ -323,16 +454,16 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
      * @returns Promise resolved when done.
      */
     async endMeeting(): Promise<void> {
-        if (!this.bbb) {
+        const bbb = this.bbb();
+        if (!bbb) {
             return;
         }
 
         try {
-            await CoreDomUtils.showConfirm(
-                Translate.instant('addon.mod_bigbluebuttonbn.end_session_confirm'),
-                Translate.instant('addon.mod_bigbluebuttonbn.end_session_confirm_title'),
-                Translate.instant('core.yes'),
-            );
+            await CoreAlerts.confirm(Translate.instant('addon.mod_bigbluebuttonbn.end_session_confirm'), {
+                header: Translate.instant('addon.mod_bigbluebuttonbn.end_session_confirm_title'),
+                okText: Translate.instant('core.yes'),
+            });
         } catch {
             // User canceled.
             return;
@@ -341,11 +472,11 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
         const modal = await CoreLoadings.show();
 
         try {
-            await AddonModBBB.endMeeting(this.bbb.id, this.groupId);
+            await AddonModBBB.endMeeting(bbb.id, this.groupId());
 
             this.updateMeetingInfo();
         } catch (error) {
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
         } finally {
             modal.dismiss();
         }
@@ -357,7 +488,8 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
      * @param recording Recording.
      */
     toggle(recording: Recording): void {
-        recording.expanded = !recording.expanded;
+        this.recordings.update(recordings =>
+            recordings?.map(r => r === recording ? { ...r, expanded: !r.expanded } : r));
     }
 
     /**
@@ -370,7 +502,12 @@ export class AddonModBBBIndexComponent extends CoreCourseModuleMainActivityCompo
         event.preventDefault();
         event.stopPropagation();
 
-        CoreSites.getCurrentSite()?.openInBrowserWithAutoLogin(playback.url);
+        let url = playback.url;
+        if (!url.match(/[&?]group=/)) {
+            url = CoreUrl.addParamsToUrl(url, { group: String(this.groupId()) });
+        }
+
+        CoreSites.getCurrentSite()?.openInBrowserWithAutoLogin(url);
     }
 
 }
@@ -384,6 +521,7 @@ type Recording = {
     playbackLabel: string;
     playbacks: RecordingPlayback[];
     details: RecordingDetail[];
+    timestamp?: number;
 };
 
 /**

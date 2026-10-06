@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { APP_INITIALIZER, NgModule, Type } from '@angular/core';
+import { NgModule, Type, provideAppInitializer } from '@angular/core';
 import { CoreCronDelegate } from '@services/cron';
 import { CoreCourseOptionsDelegate } from '@features/course/services/course-options-delegate';
 import { CoreUserDelegate } from '@features/user/services/user-delegate';
@@ -24,6 +24,7 @@ import { NOTES_OFFLINE_SITE_SCHEMA } from './services/database/notes';
 import { Routes } from '@angular/router';
 import { CoreMainMenuTabRoutingModule } from '@features/mainmenu/mainmenu-tab-routing.module';
 import { CoreCourseIndexRoutingModule } from '@features/course/course-routing.module';
+import { CoreCourseForceLanguageSource } from '@features/course/constants';
 
 /**
  * Get notes services.
@@ -45,7 +46,8 @@ export async function getNotesServices(): Promise<Type<unknown>[]> {
 const routes: Routes = [
     {
         path: 'notes',
-        loadChildren: () => import('@addons/notes/notes-lazy.module').then(m => m.AddonNotesLazyModule),
+        loadComponent: () => import('./pages/list/list'),
+        data: { checkForcedLanguage: CoreCourseForceLanguageSource.COURSE },
     },
 ];
 
@@ -60,15 +62,11 @@ const routes: Routes = [
             useValue: [NOTES_OFFLINE_SITE_SCHEMA],
             multi: true,
         },
-        {
-            provide: APP_INITIALIZER,
-            multi: true,
-            useValue: () => {
-                CoreUserDelegate.registerHandler(AddonNotesUserHandler.instance);
-                CoreCourseOptionsDelegate.registerHandler(AddonNotesCourseOptionHandler.instance);
-                CoreCronDelegate.register(AddonNotesSyncCronHandler.instance);
-            },
-        },
+        provideAppInitializer(() => {
+            CoreUserDelegate.registerHandler(AddonNotesUserHandler.instance);
+            CoreCourseOptionsDelegate.registerHandler(AddonNotesCourseOptionHandler.instance);
+            CoreCronDelegate.register(AddonNotesSyncCronHandler.instance);
+        }),
     ],
 })
 export class AddonNotesModule {}

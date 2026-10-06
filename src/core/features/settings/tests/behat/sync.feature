@@ -1,4 +1,4 @@
-@core_settings @app @javascript
+@app_parallel_run_settings @core_settings @app @javascript
 Feature: It synchronise sites properly
 
   Background:
@@ -19,7 +19,8 @@ Feature: It synchronise sites properly
 
   Scenario: Sync the current site
     # Add something offline
-    Given I entered the choice activity "Sync choice" on course "Course 1" as "student1" in the app
+    Given I entered the course "Course 1" as "student1" in the app
+    And I press "Sync choice" in the app
     When I switch network connection to offline
     And I select "Option 1" in the app
     And I press "Save my choice" in the app

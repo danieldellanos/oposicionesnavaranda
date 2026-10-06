@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { CoreHTMLClasses } from '@singletons/html-classes';
+import { CoreApp } from '@services/app';
+import { CoreHTMLClasses } from '@static/html-classes';
 
 /**
  * General App initializer.
  */
 export default async function(): Promise<void> {
     CoreHTMLClasses.initialize();
+    CoreApp.initialize();
 }

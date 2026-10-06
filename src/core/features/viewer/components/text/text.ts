@@ -18,7 +18,7 @@ import { toBoolean } from '@/core/transforms/boolean';
 import { Component, Input } from '@angular/core';
 import { CoreFileEntry } from '@services/file-helper';
 
-import { CoreText } from '@singletons/text';
+import { CoreText } from '@static/text';
 import { ModalController } from '@singletons';
 
 /**
@@ -28,7 +28,6 @@ import { ModalController } from '@singletons';
     selector: 'page-core-viewer-text',
     templateUrl: 'text.html',
     styleUrl: 'text.scss',
-    standalone: true,
     imports: [
         CoreSharedModule,
     ],

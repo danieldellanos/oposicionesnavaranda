@@ -13,13 +13,10 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { CoreBlockDelegate } from '@features/block/services/block-delegate';
 import { CoreMainMenuHomeHandler, CoreMainMenuHomeHandlerToDisplay } from '@features/mainmenu/services/home-delegate';
-import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
 import { makeSingleton } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
 import { CoreCoursesDashboard } from '../dashboard';
+import { CORE_COURSES_DASHBOARD_PAGE_NAME } from '@features/courses/constants';
 
 /**
  * Handler to add dashboard into home page.
@@ -27,70 +24,23 @@ import { CoreCoursesDashboard } from '../dashboard';
 @Injectable({ providedIn: 'root' })
 export class CoreDashboardHomeHandlerService implements CoreMainMenuHomeHandler {
 
-    static readonly PAGE_NAME = 'dashboard';
-
     name = 'CoreCoursesDashboard';
     priority = 1200;
-    logger: CoreLogger;
-
-    constructor() {
-        this.logger = CoreLogger.getInstance('CoreDashboardHomeHandlerService');
-    }
 
     /**
-     * Check if the handler is enabled on a site level.
-     *
-     * @returns Whether or not the handler is enabled on a site level.
+     * @inheritdoc
      */
     isEnabled(): Promise<boolean> {
-        return this.isEnabledForSite();
+        return CoreCoursesDashboard.isAvailable();
     }
 
     /**
-     * Check if the handler is enabled on a certain site.
-     *
-     * @param siteId Site ID. If not defined, current site.
-     * @returns Whether or not the handler is enabled on a site level.
-     */
-    async isEnabledForSite(siteId?: string): Promise<boolean> {
-        const site = await CoreSites.getSite(siteId);
-
-        // Check if blocks and 3.6 dashboard is enabled.
-        const [blocksDisabled, dashboardDisabled, dashboardAvailable, dashboardConfig] = await Promise.all([
-            CoreBlockDelegate.areBlocksDisabled(site.getId()),
-            CoreCoursesDashboard.isDisabled(site.getId()),
-            CoreCoursesDashboard.isAvailable(site.getId()),
-            CoreUtils.ignoreErrors(site.getConfig('enabledashboard'), '1'),
-        ]);
-        const dashboardEnabled = !dashboardDisabled && dashboardConfig !== '0';
-
-        if (dashboardAvailable && dashboardEnabled && !blocksDisabled) {
-            try {
-                const blocks = await CoreCoursesDashboard.getDashboardBlocks(undefined, siteId);
-
-                return CoreBlockDelegate.hasSupportedBlock(blocks.mainBlocks) ||
-                    CoreBlockDelegate.hasSupportedBlock(blocks.sideBlocks);
-            } catch (error) {
-                // Error getting blocks, assume it's enabled.
-                this.logger.error('Error getting Dashboard blocks', error);
-
-                return true;
-            }
-        }
-
-        // Dashboard is enabled but not available, we will fake blocks.
-        return dashboardEnabled && !blocksDisabled;
-    }
-
-    /**
-     * Returns the data needed to render the handler.
-     *
-     * @returns Data needed to render the handler.
+     * @inheritdoc
      */
     getDisplayData(): CoreMainMenuHomeHandlerToDisplay {
         return {
             title: 'core.courses.mymoodle',
-            page: CoreDashboardHomeHandlerService.PAGE_NAME,
+            page: CORE_COURSES_DASHBOARD_PAGE_NAME,
             class: 'core-courses-dashboard-handler',
             icon: 'fas-gauge-high',
         };

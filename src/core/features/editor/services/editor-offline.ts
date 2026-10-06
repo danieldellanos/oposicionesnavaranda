@@ -16,9 +16,9 @@ import { Injectable } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
 
 import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreObject } from '@static/object';
 import { makeSingleton } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { CoreEditorDraft, CoreEditorDraftPrimaryData, DRAFT_TABLE } from './database/editor';
 import { ContextLevel } from '@/core/constants';
 
@@ -82,7 +82,7 @@ export class CoreEditorOfflineProvider {
             contextlevel: contextLevel,
             contextinstanceid: contextInstanceId,
             elementid: elementId,
-            extraparams: CoreUtils.sortAndStringify(extraParams || {}),
+            extraparams: CoreObject.sortAndStringify(extraParams || {}),
         };
     }
 
@@ -202,7 +202,7 @@ export class CoreEditorOfflineProvider {
             entry = await this.getDraft(contextLevel, contextInstanceId, elementId, extraParams, siteId);
 
             timecreated = entry.timecreated || timecreated;
-        } catch (error) {
+        } catch {
             // No draft already stored.
         }
 

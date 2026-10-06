@@ -15,15 +15,18 @@
 import { Injectable } from '@angular/core';
 
 import { CoreNavigator } from '@services/navigator';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUtils } from '@static/utils';
 import { makeSingleton } from '@singletons';
 import { CorePushNotificationsClickHandler } from '@features/pushnotifications/services/push-delegate';
 import { CorePushNotificationsNotificationBasicData } from '@features/pushnotifications/services/pushnotifications';
 import { CoreContentLinksHelper } from '@features/contentlinks/services/contentlinks-helper';
 import { AddonNotifications } from '../notifications';
-import { AddonNotificationsMainMenuHandlerService } from './mainmenu';
 import { AddonNotificationsHelper } from '../notifications-helper';
 import { CoreViewer } from '@features/viewer/services/viewer';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreOpener } from '@static/opener';
+import { ADDONS_NOTIFICATIONS_MAIN_PAGE_NAME, ADDONS_NOTIFICATIONS_MENU_FEATURE_NAME } from '@addons/notifications/constants';
+import { CoreLinkOpenMethod } from '@/core/constants';
 
 /**
  * Handler for non-messaging push notifications clicks.
@@ -33,7 +36,7 @@ export class AddonNotificationsPushClickHandlerService implements CorePushNotifi
 
     name = 'AddonNotificationsPushClickHandler';
     priority = 0; // Low priority so it's used as a fallback if no other handler treats the notification.
-    featureName = 'CoreMainMenuDelegate_AddonNotifications';
+    featureName = ADDONS_NOTIFICATIONS_MENU_FEATURE_NAME;
 
     /**
      * Check if a notification click is handled by this handler.
@@ -64,7 +67,7 @@ export class AddonNotificationsPushClickHandlerService implements CorePushNotifi
      * @returns Promise resolved when done.
      */
     protected async markAsRead(notification: AddonNotificationsPushNotification): Promise<void> {
-        await CoreUtils.ignoreErrors(AddonNotificationsHelper.markNotificationAsRead(notification));
+        await CorePromiseUtils.ignoreErrors(AddonNotificationsHelper.markNotificationAsRead(notification));
     }
 
     /**
@@ -88,16 +91,23 @@ export class AddonNotificationsPushClickHandlerService implements CorePushNotifi
             const url = <string> notification.customdata.appurl;
 
             switch (notification.customdata.appurlopenin) {
-                case 'inapp':
-                    CoreUtils.openInApp(url);
+                case CoreLinkOpenMethod.INAPPBROWSER:
+                case 'inapp': // For backwards compatibility, accept 'inapp' too. @deprecated since 5.2.
+                    CoreOpener.openInApp(url);
 
                     return;
 
-                case 'browser':
-                    return CoreUtils.openInBrowser(url);
+                case CoreLinkOpenMethod.BROWSER:
+                    return CoreOpener.openInBrowser(url);
+
+                case CoreLinkOpenMethod.EMBEDDED:
+                    return CoreViewer.openIframeViewer(notification.title ?? notification.message ?? '', url);
 
                 default: {
-                    const treated = await CoreContentLinksHelper.handleLink(url, undefined, undefined, true);
+                    const treated = await CoreContentLinksHelper.handleLink(url, {
+                        checkRoot: true,
+                        openBrowserRoot: true,
+                    });
                     if (treated) {
                         // Link treated, stop.
                         return;
@@ -116,10 +126,10 @@ export class AddonNotificationsPushClickHandlerService implements CorePushNotifi
         }
 
         // No contexturl or cannot be handled by the app. Open the notifications page.
-        await CoreUtils.ignoreErrors(AddonNotifications.invalidateNotificationsList(notification.site));
+        await CorePromiseUtils.ignoreErrors(AddonNotifications.invalidateNotificationsList(notification.site));
 
         await CoreNavigator.navigateToSitePath(
-            `${AddonNotificationsMainMenuHandlerService.PAGE_NAME}/list`,
+            `${ADDONS_NOTIFICATIONS_MAIN_PAGE_NAME}/list`,
             {
                 siteId: notification.site,
                 preferCurrentTab: false,
@@ -139,7 +149,7 @@ export const AddonNotificationsPushClickHandler = makeSingleton(AddonNotificatio
 
 export type AddonNotificationsPushNotification = CorePushNotificationsNotificationBasicData & {
     contexturl?: string; // URL related to the notification.
-    savedmessageid?: number; // Notification ID (optional).
+    savedmessageid?: number | string; // Notification ID (optional).
     id?: number; // Notification ID (optional).
     date?: string | number; // Notification date (timestamp). E.g. "1669204700".
 };

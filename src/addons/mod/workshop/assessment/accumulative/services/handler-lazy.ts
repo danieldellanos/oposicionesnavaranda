@@ -22,9 +22,8 @@ import {
 import { Injectable, Type } from '@angular/core';
 import { CoreGradesHelper } from '@features/grades/services/grades-helper';
 import { makeSingleton, Translate } from '@singletons';
-import { CoreFormFields } from '@singletons/form';
+import { CoreFormFields } from '@static/form';
 import { AddonWorkshopAssessmentStrategyHandler } from '../../../services/assessment-strategy-delegate';
-import { AddonModWorkshopAssessmentStrategyAccumulativeComponent } from '../component/accumulative';
 import { AddonModWorkshopAssessmentStrategyAccumulativeHandlerService } from './handler';
 
 /**
@@ -38,7 +37,9 @@ export class AddonModWorkshopAssessmentStrategyAccumulativeHandlerLazyService
     /**
      * @inheritdoc
      */
-    getComponent(): Type<unknown> {
+    async getComponent(): Promise<Type<unknown>> {
+        const { AddonModWorkshopAssessmentStrategyAccumulativeComponent } = await import('../component/accumulative');
+
         return AddonModWorkshopAssessmentStrategyAccumulativeComponent;
     }
 
@@ -61,7 +62,7 @@ export class AddonModWorkshopAssessmentStrategyAccumulativeHandlerLazyService
 
             originalValues[n] = {};
             originalValues[n].peercomment = form.current[n].peercomment || '';
-            originalValues[n].number = field.number; // eslint-disable-line id-blacklist
+            originalValues[n].number = field.number; // eslint-disable-line id-denylist
 
             form.current[n].grade = form.current[n].grade ? parseInt(String(form.current[n].grade), 10) : -1;
 
@@ -116,17 +117,17 @@ export class AddonModWorkshopAssessmentStrategyAccumulativeHandlerLazyService
             if (idx < form.dimenssionscount) {
                 const grade = parseInt(String(currentValues[idx].grade), 10);
                 if (!isNaN(grade) && grade >= 0) {
-                    data['grade__idx_' + idx] = grade;
+                    data[`grade__idx_${idx}`] = grade;
                 } else {
-                    errors['grade_' + idx] = Translate.instant('addon.mod_workshop_assessment_accumulative.mustchoosegrade');
+                    errors[`grade_${idx}`] = Translate.instant('addon.mod_workshop_assessment_accumulative.mustchoosegrade');
                     hasErrors = true;
                 }
 
-                data['peercomment__idx_' + idx] = currentValues[idx].peercomment ?? '';
+                data[`peercomment__idx_${idx}`] = currentValues[idx].peercomment ?? '';
 
-                data['gradeid__idx_' + idx] = parseInt(form.current[idx].gradeid, 10) || 0;
-                data['dimensionid__idx_' + idx] = parseInt(field.dimensionid, 10);
-                data['weight__idx_' + idx] = parseInt(field.weight, 10) || 0;
+                data[`gradeid__idx_${idx}`] = parseInt(form.current[idx].gradeid, 10) || 0;
+                data[`dimensionid__idx_${idx}`] = parseInt(field.dimensionid, 10);
+                data[`weight__idx_${idx}`] = parseInt(field.weight, 10) || 0;
             }
         });
 

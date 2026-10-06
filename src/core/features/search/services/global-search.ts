@@ -19,9 +19,10 @@ import { CoreWSExternalWarning } from '@services/ws';
 import { CoreCourseListItem, CoreCourses } from '@features/courses/services/courses';
 import { CoreUserWithAvatar } from '@components/user-avatar/user-avatar';
 import { CoreUser } from '@features/user/services/user';
-import { CoreSite } from '@classes/sites/site';
+import { CoreCacheUpdateFrequency } from '@/core/constants';
+import { CoreTextFormat } from '@static/text';
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -76,12 +77,12 @@ export type CoreSearchGlobalSearchSearchArea = {
     category: CoreSearchGlobalSearchSearchAreaCategory;
 };
 
-export interface CoreSearchGlobalSearchFilters {
+export type CoreSearchGlobalSearchFilters = {
     searchAreaCategoryIds?: string[];
     searchAreaIds?: string[];
     courseIds?: number[];
     contextIds?: number[];
-}
+};
 
 /**
  * Service to perform global searches.
@@ -94,6 +95,7 @@ export class CoreSearchGlobalSearchService {
     /**
      * Check whether global search is enabled or not.
      *
+     * @param siteId Site ID. If not defined, current site.
      * @returns Whether global search is enabled or not.
      */
     async isEnabled(siteId?: string): Promise<boolean> {
@@ -154,7 +156,7 @@ export class CoreSearchGlobalSearchService {
         const params: CoreSearchGetSearchAreasListWSParams = {};
 
         const { areas } = await site.read<CoreSearchGetSearchAreasListWSResponse>('core_search_get_search_areas_list', params, {
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
             cacheKey: CoreSearchGlobalSearchService.SEARCH_AREAS_CACHE_KEY,
         });
 
@@ -358,7 +360,7 @@ type CoreSearchWSResult = { // Search results.
     userid?: number; // User id.
     userurl?: string; // User url.
     userfullname?: string; // User fullname.
-    textformat: number; // Text fields format, it is the same for all of them.
+    textformat: CoreTextFormat; // Text fields format, it is the same for all of them.
 };
 
 /**

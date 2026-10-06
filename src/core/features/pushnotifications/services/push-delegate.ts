@@ -16,9 +16,9 @@ import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
 
 import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { makeSingleton } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { CorePushNotificationsNotificationBasicData } from './pushnotifications';
 
 /**
@@ -102,7 +102,7 @@ export class CorePushNotificationsDelegateService {
             }
         });
 
-        await CoreUtils.ignoreErrors(CoreUtils.allPromises(promises));
+        await CorePromiseUtils.allPromisesIgnoringErrors(promises);
 
         // Sort by priority.
         handlers = handlers.sort((a, b) => (a.priority || 0) <= (b.priority || 0) ? 1 : -1);

@@ -14,9 +14,10 @@
 
 import { Component } from '@angular/core';
 
-import { AuthEmailSignupProfileField } from '@features/login/services/login-helper';
+import { AuthEmailSignupProfileField } from '@features/login/services/signup';
 import { CoreUserProfileFieldBaseComponent } from '@features/user/classes/base-profilefield-component';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUtils } from '@static/utils';
+import { CoreSharedModule } from '@/core/shared.module';
 
 /**
  * Directive to render a text user profile field.
@@ -24,6 +25,9 @@ import { CoreUtils } from '@services/utils/utils';
 @Component({
     selector: 'addon-user-profile-field-text',
     templateUrl: 'addon-user-profile-field-text.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
 export class AddonUserProfileFieldTextComponent extends CoreUserProfileFieldBaseComponent {
 
@@ -31,9 +35,7 @@ export class AddonUserProfileFieldTextComponent extends CoreUserProfileFieldBase
     maxLength?: number;
 
     /**
-     * Init the data when the field is meant to be displayed for editing.
-     *
-     * @param field Field to render.
+     * @inheritdoc
      */
     protected initForEdit(field: AuthEmailSignupProfileField): void {
         super.initForEdit(field);

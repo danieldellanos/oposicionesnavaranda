@@ -14,24 +14,22 @@
 
 import { Injectable } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
-import { CoreSite } from '@classes/sites/site';
-import { CoreCourseCommonModWSOptions } from '@features/course/services/course';
+import { CoreCourseCommonModWSOptions, CoreCourseCommonModWSOptionsWithFilter } from '@features/course/services/course';
 import { CoreCourseLogHelper } from '@features/course/services/log-helper';
 import { CoreGradesMenuItem } from '@features/grades/services/grades-helper';
 import { CoreNetwork } from '@services/network';
 import { CoreSites, CoreSitesCommonWSOptions, CoreSitesReadingStrategy } from '@services/sites';
-import { CoreTextFormat, defaultTextFormat } from '@singletons/text';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreTextFormat, DEFAULT_TEXT_FORMAT } from '@static/text';
+import { CoreArray } from '@static/array';
 import { CoreStatusWithWarningsWSResponse, CoreWS, CoreWSExternalFile, CoreWSExternalWarning } from '@services/ws';
-import { makeSingleton, Translate } from '@singletons';
-import { CoreFormFields } from '@singletons/form';
+import { makeSingleton } from '@singletons';
+import { CoreFormFields } from '@static/form';
 import { AddonModWorkshopOffline } from './workshop-offline';
-import { AddonModWorkshopAutoSyncData } from './workshop-sync';
 import {
     ADDON_MOD_WORKSHOP_ASSESSMENT_INVALIDATED,
     ADDON_MOD_WORKSHOP_ASSESSMENT_SAVED,
-    ADDON_MOD_WORKSHOP_AUTO_SYNCED,
     ADDON_MOD_WORKSHOP_COMPONENT,
+    ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
     ADDON_MOD_WORKSHOP_PER_PAGE,
     ADDON_MOD_WORKSHOP_SUBMISSION_CHANGED,
     AddonModWorkshopAction,
@@ -42,8 +40,12 @@ import {
     AddonModWorkshopSubmissionType,
 } from '@addons/mod/workshop/constants';
 import { CoreSiteWSPreSets } from '@classes/sites/authenticated-site';
+import { CoreCacheUpdateFrequency } from '@/core/constants';
+import { CoreWSError } from '@classes/errors/wserror';
+import { CoreObject } from '@static/object';
+import { CoreCourseModuleHelper } from '@features/course/services/course-module-helper';
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -51,7 +53,6 @@ declare module '@singletons/events' {
      * @see https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation
      */
     export interface CoreEventsData {
-        [ADDON_MOD_WORKSHOP_AUTO_SYNCED]: AddonModWorkshopAutoSyncData;
         [ADDON_MOD_WORKSHOP_SUBMISSION_CHANGED]: AddonModWorkshopSubmissionChangedEventData;
         [ADDON_MOD_WORKSHOP_ASSESSMENT_SAVED]: AddonModWorkshopAssessmentSavedChangedEventData;
         [ADDON_MOD_WORKSHOP_ASSESSMENT_INVALIDATED]: AddonModWorkshopAssessmentInvalidatedChangedEventData;
@@ -73,7 +74,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getWorkshopDataCacheKey(courseId: number): string {
-        return AddonModWorkshopProvider.ROOT_CACHE_KEY + 'workshop:' + courseId;
+        return `${AddonModWorkshopProvider.ROOT_CACHE_KEY}workshop:${courseId}`;
     }
 
     /**
@@ -93,7 +94,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getWorkshopAccessInformationDataCacheKey(workshopId: number): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':access';
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:access`;
     }
 
     /**
@@ -103,7 +104,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getUserPlanDataCacheKey(workshopId: number): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':userplan';
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:userplan`;
     }
 
     /**
@@ -114,8 +115,8 @@ export class AddonModWorkshopProvider {
      * @param groupId Group ID.
      * @returns Cache key.
      */
-    protected getSubmissionsDataCacheKey(workshopId: number, userId: number = 0, groupId: number = 0): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':submissions:' + userId + ':' + groupId;
+    protected getSubmissionsDataCacheKey(workshopId: number, userId = 0, groupId = 0): string {
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:submissions:${userId}:${groupId}`;
     }
 
     /**
@@ -126,7 +127,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getSubmissionDataCacheKey(workshopId: number, submissionId: number): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':submission:' + submissionId;
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:submission:${submissionId}`;
     }
 
     /**
@@ -136,7 +137,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getGradesDataCacheKey(workshopId: number): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':grades';
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:grades`;
     }
 
     /**
@@ -146,8 +147,8 @@ export class AddonModWorkshopProvider {
      * @param groupId Group ID.
      * @returns Cache key.
      */
-    protected getGradesReportDataCacheKey(workshopId: number, groupId: number = 0): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':report:' + groupId;
+    protected getGradesReportDataCacheKey(workshopId: number, groupId = 0): string {
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:report:${groupId}`;
     }
 
     /**
@@ -158,7 +159,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getSubmissionAssessmentsDataCacheKey(workshopId: number, submissionId: number): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':assessments:' + submissionId;
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:assessments:${submissionId}`;
     }
 
     /**
@@ -168,8 +169,8 @@ export class AddonModWorkshopProvider {
      * @param userId User ID or current user.
      * @returns Cache key.
      */
-    protected getReviewerAssessmentsDataCacheKey(workshopId: number, userId: number = 0): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':reviewerassessments:' + userId;
+    protected getReviewerAssessmentsDataCacheKey(workshopId: number, userId = 0): string {
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:reviewerassessments:${userId}`;
     }
 
     /**
@@ -180,7 +181,7 @@ export class AddonModWorkshopProvider {
      * @returns Cache key.
      */
     protected getAssessmentDataCacheKey(workshopId: number, assessmentId: number): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':assessment:' + assessmentId;
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:assessment:${assessmentId}`;
     }
 
     /**
@@ -191,8 +192,8 @@ export class AddonModWorkshopProvider {
      * @param mode Mode assessment (default) or preview.
      * @returns Cache key.
      */
-    protected getAssessmentFormDataCacheKey(workshopId: number, assessmentId: number, mode: string = 'assessment'): string {
-        return this.getWorkshopDataPrefixCacheKey(workshopId) + ':assessmentsform:' + assessmentId + ':' + mode;
+    protected getAssessmentFormDataCacheKey(workshopId: number, assessmentId: number, mode = 'assessment'): string {
+        return `${this.getWorkshopDataPrefixCacheKey(workshopId)}:assessmentsform:${assessmentId}:${mode}`;
     }
 
     /**
@@ -206,7 +207,7 @@ export class AddonModWorkshopProvider {
      */
     protected async getWorkshopByKey(
         courseId: number,
-        key: string,
+        key: 'coursemodule' | 'id',
         value: number,
         options: CoreSitesCommonWSOptions = {},
     ): Promise<AddonModWorkshopData> {
@@ -218,8 +219,8 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getWorkshopDataCacheKey(courseId),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
         const response = await site.read<AddonModWorkshopGetWorkshopsByCoursesWSResponse>(
@@ -228,10 +229,7 @@ export class AddonModWorkshopProvider {
             preSets,
         );
 
-        const workshop = response.workshops.find((workshop) => workshop[key] == value);
-        if (!workshop) {
-            throw new CoreError(Translate.instant('core.course.modulenotfound'));
-        }
+        const workshop = CoreCourseModuleHelper.getActivityByField(response.workshops, key, value);
 
         // Set submission types for Moodle 3.5.
         if (workshop.submissiontypetext === undefined) {
@@ -316,7 +314,7 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getWorkshopAccessInformationDataCacheKey(workshopId),
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -333,7 +331,6 @@ export class AddonModWorkshopProvider {
      *
      * @param workshopId Workshop ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateWorkshopAccessInformationData(workshopId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -360,15 +357,15 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getUserPlanDataCacheKey(workshopId),
-            updateFrequency: CoreSite.FREQUENCY_OFTEN,
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.OFTEN,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
 
         const response = await site.read<AddonModWorkshopGetUserPlanWSResponse>('mod_workshop_get_user_plan', params, preSets);
 
-        return CoreUtils.arrayToObject(response.userplan.phases, 'code');
+        return CoreArray.toObject(response.userplan.phases, 'code');
     }
 
     /**
@@ -376,7 +373,6 @@ export class AddonModWorkshopProvider {
      *
      * @param workshopId Workshop ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateUserPlanPhasesData(workshopId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -401,16 +397,21 @@ export class AddonModWorkshopProvider {
 
         const params: AddonModWorkshopGetSubmissionsWSParams = {
             workshopid: workshopId,
-            userid: userId,
             groupid: groupId,
         };
 
+        if (options.userId && options.userId !== site.getUserId()) {
+            params.userid = options.userId;
+        }
+
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getSubmissionsDataCacheKey(workshopId, userId, groupId),
-            updateFrequency: CoreSite.FREQUENCY_OFTEN,
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.OFTEN,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
+            ...CoreSites.getFilterPresets(options.filter),
+            fetchOriginalToo: options.canEdit && !params.userid,
         };
 
         const response = await site.read<AddonModWorkshopGetSubmissionsWSResponse>('mod_workshop_get_submissions', params, preSets);
@@ -425,9 +426,8 @@ export class AddonModWorkshopProvider {
      * @param userId User ID.
      * @param groupId Group ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
-    async invalidateSubmissionsData(workshopId: number, userId: number = 0, groupId: number = 0, siteId?: string): Promise<void> {
+    async invalidateSubmissionsData(workshopId: number, userId = 0, groupId = 0, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
 
         await site.invalidateWsCacheForKey(this.getSubmissionsDataCacheKey(workshopId, userId, groupId));
@@ -444,7 +444,7 @@ export class AddonModWorkshopProvider {
     async getSubmission(
         workshopId: number,
         submissionId: number,
-        options: CoreCourseCommonModWSOptions = {},
+        options: AddonModWorkshopGetSubmissionOptions = {},
     ): Promise<AddonModWorkshopSubmissionData> {
         const site = await CoreSites.getSite(options.siteId);
 
@@ -454,9 +454,11 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getSubmissionDataCacheKey(workshopId, submissionId),
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
+            ...CoreSites.getFilterPresets(options.filter),
+            fetchOriginalToo: options.canEdit,
         };
 
         const response = await site.read<AddonModWorkshopGetSubmissionWSResponse>('mod_workshop_get_submission', params, preSets);
@@ -470,7 +472,6 @@ export class AddonModWorkshopProvider {
      * @param workshopId Workshop ID.
      * @param submissionId Submission ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateSubmissionData(workshopId: number, submissionId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -494,7 +495,7 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getGradesDataCacheKey(workshopId),
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -507,7 +508,6 @@ export class AddonModWorkshopProvider {
      *
      * @param workshopId Workshop ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateGradesData(workshopId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -537,8 +537,8 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getGradesReportDataCacheKey(workshopId, options.groupId),
-            updateFrequency: CoreSite.FREQUENCY_OFTEN,
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.OFTEN,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -604,9 +604,8 @@ export class AddonModWorkshopProvider {
      * @param workshopId Workshop ID.
      * @param groupId Group ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
-    async invalidateGradeReportData(workshopId: number, groupId: number = 0, siteId?: string): Promise<void> {
+    async invalidateGradeReportData(workshopId: number, groupId = 0, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
 
         await site.invalidateWsCacheForKey(this.getGradesReportDataCacheKey(workshopId, groupId));
@@ -634,7 +633,7 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getSubmissionAssessmentsDataCacheKey(workshopId, submissionId),
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -653,7 +652,6 @@ export class AddonModWorkshopProvider {
      * @param workshopId Workshop ID.
      * @param submissionId Submission ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateSubmissionAssesmentsData(workshopId: number, submissionId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -680,7 +678,7 @@ export class AddonModWorkshopProvider {
         content: string,
         attachmentsId?: number,
         siteId?: string,
-        allowOffline: boolean = false,
+        allowOffline = false,
     ): Promise<number | false> {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
@@ -711,7 +709,7 @@ export class AddonModWorkshopProvider {
         try {
             return await this.addSubmissionOnline(workshopId, title, content, attachmentsId as number, siteId);
         } catch (error) {
-            if (allowOffline && !CoreUtils.isWebServiceError(error)) {
+            if (allowOffline && !CoreWSError.isWebServiceError(error)) {
                 // Couldn't connect to server, store in offline.
                 return storeOffline();
             }
@@ -780,7 +778,7 @@ export class AddonModWorkshopProvider {
         content: string,
         attachmentsId?: number | undefined,
         siteId?: string,
-        allowOffline: boolean = false,
+        allowOffline = false,
     ): Promise<number | false> {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
@@ -811,7 +809,7 @@ export class AddonModWorkshopProvider {
         try {
             return await this.updateSubmissionOnline(submissionId, title, content, attachmentsId as number, siteId);
         } catch (error) {
-            if (allowOffline && !CoreUtils.isWebServiceError(error)) {
+            if (allowOffline && !CoreWSError.isWebServiceError(error)) {
                 // Couldn't connect to server, store in offline.
                 return storeOffline();
             }
@@ -890,7 +888,7 @@ export class AddonModWorkshopProvider {
         try {
             return await this.deleteSubmissionOnline(submissionId, siteId);
         } catch (error) {
-            if (!CoreUtils.isWebServiceError(error)) {
+            if (!CoreWSError.isWebServiceError(error)) {
                 // Couldn't connect to server, store in offline.
                 return storeOffline();
             }
@@ -928,7 +926,7 @@ export class AddonModWorkshopProvider {
      */
     async getReviewerAssessments(
         workshopId: number,
-        options: AddonModWorkshopUserOptions = {},
+        options: AddonModWorkshopGetAssessmentsOptions = {},
     ): Promise<AddonModWorkshopSubmissionAssessmentData[]> {
         const site = await CoreSites.getSite(options.siteId);
 
@@ -936,16 +934,18 @@ export class AddonModWorkshopProvider {
             workshopid: workshopId,
         };
 
-        const preSets: CoreSiteWSPreSets = {
-            cacheKey: this.getReviewerAssessmentsDataCacheKey(workshopId, options.userId),
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
-            componentId: options.cmId,
-            ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
-        };
-
-        if (options.userId) {
+        if (options.userId && options.userId !== site.getUserId()) {
             params.userid = options.userId;
         }
+
+        const preSets: CoreSiteWSPreSets = {
+            cacheKey: this.getReviewerAssessmentsDataCacheKey(workshopId, options.userId),
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
+            componentId: options.cmId,
+            ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
+            ...CoreSites.getFilterPresets(options.filter),
+            fetchOriginalToo: options.canAssess && !params.userid,
+        };
 
         const response =
             await site.read<AddonModWorkshopGetAssessmentsWSResponse>('mod_workshop_get_reviewer_assessments', params, preSets);
@@ -959,7 +959,6 @@ export class AddonModWorkshopProvider {
      * @param workshopId Workshop ID.
      * @param userId User ID. If not defined, current user.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateReviewerAssesmentsData(workshopId: number, userId?: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -978,7 +977,7 @@ export class AddonModWorkshopProvider {
     async getAssessment(
         workshopId: number,
         assessmentId: number,
-        options: CoreCourseCommonModWSOptions = {},
+        options: AddonModWorkshopGetAssessmentOptions = {},
     ): Promise<AddonModWorkshopSubmissionAssessmentData> {
         const site = await CoreSites.getSite(options.siteId);
 
@@ -988,9 +987,11 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getAssessmentDataCacheKey(workshopId, assessmentId),
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
+            ...CoreSites.getFilterPresets(options.filter),
+            fetchOriginalToo: options.canAssess,
         };
         const response = await site.read<AddonModWorkshopGetAssessmentWSResponse>('mod_workshop_get_assessment', params, preSets);
 
@@ -1003,7 +1004,6 @@ export class AddonModWorkshopProvider {
      * @param workshopId Workshop ID.
      * @param assessmentId Assessment ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAssessmentData(workshopId: number, assessmentId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -1035,8 +1035,8 @@ export class AddonModWorkshopProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getAssessmentFormDataCacheKey(workshopId, assessmentId, mode),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_WORKSHOP_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_WORKSHOP_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -1054,7 +1054,7 @@ export class AddonModWorkshopProvider {
             warnings: response.warnings,
             fields: this.parseFields(response.fields),
             current: this.parseFields(response.current),
-            options: CoreUtils.objectToKeyValueMap<string>(response.options, 'name', 'value'),
+            options: CoreObject.toKeyValueMap<string>(response.options, 'name', 'value'),
         };
     }
 
@@ -1078,7 +1078,7 @@ export class AddonModWorkshopProvider {
             if (!isNaN(idxNumber)) {
                 if (!parsedFields[idx]) {
                     parsedFields[idx] = {
-                        number: idxNumber + 1, // eslint-disable-line id-blacklist
+                        number: idxNumber + 1, // eslint-disable-line id-denylist
                     };
                 }
 
@@ -1089,7 +1089,7 @@ export class AddonModWorkshopProvider {
 
                     if (!parsedFields[idx].fields[idy]) {
                         parsedFields[idx].fields[idy] = {
-                            number: idyNumber + 1, // eslint-disable-line id-blacklist
+                            number: idyNumber + 1, // eslint-disable-line id-denylist
                         };
                     }
                     parsedFields[idx].fields[idy][name] = field.value;
@@ -1109,12 +1109,11 @@ export class AddonModWorkshopProvider {
      * @param assessmentId Assessment ID.
      * @param mode Mode assessment (default) or preview.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateAssessmentFormData(
         workshopId: number,
         assessmentId: number,
-        mode: string = 'assessment',
+        mode = 'assessment',
         siteId?: string,
     ):
         Promise<void> {
@@ -1162,7 +1161,7 @@ export class AddonModWorkshopProvider {
 
             return true;
         } catch (error) {
-            if (allowOffline && !CoreUtils.isWebServiceError(error)) {
+            if (allowOffline && !CoreWSError.isWebServiceError(error)) {
                 // Couldn't connect to server, store in offline.
                 return storeOffline();
             }
@@ -1185,7 +1184,7 @@ export class AddonModWorkshopProvider {
 
         const params: AddonModWorkshopUpdateAssessmentWSParams = {
             assessmentid: assessmentId,
-            data: CoreUtils.objectToArrayOfObjects(inputData, 'name', 'value'),
+            data: CoreObject.toArrayOfObjects(inputData, 'name', 'value'),
         };
 
         const response = await site.write<AddonModWorkshopUpdateAssessmentWSResponse>('mod_workshop_update_assessment', params);
@@ -1239,7 +1238,7 @@ export class AddonModWorkshopProvider {
         try {
             return await this.evaluateSubmissionOnline(submissionId, feedbackText, published, gradeOver, siteId);
         } catch (error) {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // The WebService has thrown an error or offline not supported, reject.
                 throw error;
             }
@@ -1272,7 +1271,7 @@ export class AddonModWorkshopProvider {
         const params: AddonModWorkshopEvaluateSubmissionWSParams = {
             submissionid: submissionId,
             feedbacktext: feedbackText || '',
-            feedbackformat: defaultTextFormat,
+            feedbackformat: DEFAULT_TEXT_FORMAT,
             published: published,
             gradeover: gradeOver,
         };
@@ -1329,7 +1328,7 @@ export class AddonModWorkshopProvider {
         try {
             return await this.evaluateAssessmentOnline(assessmentId, feedbackText, weight, gradingGradeOver, siteId);
         } catch (error) {
-            if (!CoreUtils.isWebServiceError(error)) {
+            if (!CoreWSError.isWebServiceError(error)) {
                 // Couldn't connect to server, store in offline.
                 return storeOffline();
             }
@@ -1360,7 +1359,7 @@ export class AddonModWorkshopProvider {
         const params: AddonModWorkshopEvaluateAssessmentWSParams = {
             assessmentid: assessmentId,
             feedbacktext: feedbackText || '',
-            feedbackformat: defaultTextFormat,
+            feedbackformat: DEFAULT_TEXT_FORMAT,
             weight: weight,
             gradinggradeover: gradingGradeOver,
         };
@@ -1493,12 +1492,13 @@ export type AddonModWorkshopData = {
     name: string; // Workshop name.
     intro: string; // Workshop introduction text.
     introformat?: CoreTextFormat; // Intro format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    lang: string; // Forced activity language.
     instructauthors?: string; // Instructions for the submission phase.
     instructauthorsformat?: CoreTextFormat; // Instructauthors format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
     instructreviewers?: string; // Instructions for the assessment phase.
     instructreviewersformat?: CoreTextFormat; // Instructreviewers format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
     timemodified?: number; // The timestamp when the module was modified.
-    phase: AddonModWorkshopPhase; // The current phase of workshop.
+    phase: AddonModWorkshopPhase; // The current phase of workshop. Wrong description and value is required (See MDL-84993).
     useexamples?: boolean; // Optional feature: students practise evaluating on example submissions from teacher.
     usepeerassessment?: boolean; // Optional feature: students perform peer assessment of others' work.
     useselfassessment?: boolean; // Optional feature: students perform self assessment of their own work.
@@ -1663,7 +1663,7 @@ export type AddonModWorkshopSubmissionData = {
     grade?: number; // Aggregated grade for the submission. The grade is a decimal number from interval 0..100.
     // If NULL then the grade for submission has not been aggregated yet.
     gradeover?: number; // Grade for the submission manually overridden by a teacher. Grade is always from interval 0..100.
-    // If NULL then the grade is not overriden.
+    // If NULL then the grade is not overridden.
     gradeoverby?: number; // The id of the user who has overridden the grade for submission.
     feedbackauthor?: string; // Teacher comment/feedback for the author of the submission, for example describing the reasons
     // for the grade overriding.
@@ -1790,7 +1790,7 @@ export type AddonModWorkshopSubmissionAssessmentData = {
     // If NULL then it has not been aggregated yet.
     gradinggrade?: number; // The computed grade 0..100 for this assessment. If NULL then it has not been computed yet.
     gradinggradeover?: number; // Grade for the assessment manually overridden by a teacher.
-    // Grade is always from interval 0..100. If NULL then the grade is not overriden.
+    // Grade is always from interval 0..100. If NULL then the grade is not overridden.
     gradinggradeoverby: number; // The id of the user who has overridden the grade for submission.
     feedbackauthor: string; // The comment/feedback from the reviewer for the author.
     feedbackauthorformat?: CoreTextFormat; // Feedbackauthor format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
@@ -1858,7 +1858,7 @@ type AddonModWorkshopGetAssessmentFormDefinitionWSResponse = {
 
 export type AddonModWorkshopGetAssessmentFormDefinitionData =
     Omit<AddonModWorkshopGetAssessmentFormDefinitionWSResponse, 'fields'|'options'|'current'> & {
-        options?: {[name: string]: string} ;
+        options?: { [name: string]: string } ;
         fields: AddonModWorkshopGetAssessmentFormFieldsParsedData[]; // The form fields.
         current: AddonModWorkshopGetAssessmentFormFieldsParsedData[]; // The current field values.
     };
@@ -1871,11 +1871,11 @@ export type AddonModWorkshopGetAssessmentFormFieldData = {
 export type AddonModWorkshopGetAssessmentFormFieldsParsedData = (
     Record<string, string> &
     {
-        number?: number; // eslint-disable-line id-blacklist
+        number?: number; // eslint-disable-line id-denylist
         grades?: CoreGradesMenuItem[];
         grade?: number | string;
         fields?: (Record<string, string> & {
-            number: number; // eslint-disable-line id-blacklist
+            number: number; // eslint-disable-line id-denylist
         })[];
     }
 );
@@ -1895,9 +1895,37 @@ export type AddonModWorkshopGroupOptions = CoreCourseCommonModWSOptions & {
 };
 
 /**
+ * Common options with a user ID and an option to filter or not the content.
+ */
+export type AddonModWorkshopUserWithFilterOptions = CoreCourseCommonModWSOptionsWithFilter & AddonModWorkshopUserOptions;
+
+/**
+ * Options to pass to getSubmission.
+ */
+export type AddonModWorkshopGetSubmissionOptions = CoreCourseCommonModWSOptionsWithFilter & {
+    canEdit?: boolean; // Whether the user can edit his submission.
+};
+
+/**
  * Options to pass to getSubmissions.
  */
-export type AddonModWorkshopGetSubmissionsOptions = AddonModWorkshopUserOptions & AddonModWorkshopGroupOptions;
+export type AddonModWorkshopGetSubmissionsOptions = AddonModWorkshopUserWithFilterOptions & AddonModWorkshopGroupOptions & {
+    canEdit?: boolean; // Whether the user can edit his submission.
+};
+
+/**
+ * Options to pass to getAssessment.
+ */
+export type AddonModWorkshopGetAssessmentOptions = CoreCourseCommonModWSOptionsWithFilter & {
+    canAssess?: boolean; // Whether the user can edit the assessment.
+};
+
+/**
+ * Options to pass to getReviewerAssessments.
+ */
+export type AddonModWorkshopGetAssessmentsOptions = AddonModWorkshopUserWithFilterOptions & {
+    canAssess?: boolean; // Whether the user can edit the assessment.
+};
 
 /**
  * Options to pass to fetchAllGradeReports.
@@ -1983,7 +2011,7 @@ type AddonModWorkshopAddSubmissionWSParams = {
     workshopid: number; // Workshop id.
     title: string; // Submission title.
     content?: string; // Submission text content.
-    contentformat?: number; // The format used for the content.
+    contentformat?: CoreTextFormat; // The format used for the content.
     inlineattachmentsid?: number; // The draft file area id for inline attachments in the content.
     attachmentsid?: number; // The draft file area id for attachments.
 };
@@ -2004,7 +2032,7 @@ type AddonModWorkshopUpdateSubmissionWSParams = {
     submissionid: number; // Submission id.
     title: string; // Submission title.
     content?: string; // Submission text content.
-    contentformat?: number; // The format used for the content.
+    contentformat?: CoreTextFormat; // The format used for the content.
     inlineattachmentsid?: number; // The draft file area id for inline attachments in the content.
     attachmentsid?: number; // The draft file area id for attachments.
 };

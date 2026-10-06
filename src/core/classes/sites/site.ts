@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { InAppBrowserObject, InAppBrowserOptions } from '@awesome-cordova-plugins/in-app-browser';
+import { InAppBrowserObject, InAppBrowserOptions } from '@awesome-cordova-plugins/in-app-browser/ngx';
 
 import { CoreNetwork } from '@services/network';
 import { CoreDB } from '@services/db';
-import { CoreEventData, CoreEvents } from '@singletons/events';
+import { CoreEventData, CoreEvents } from '@static/events';
 import { CoreFile } from '@services/file';
 import {
     CoreWS,
@@ -24,14 +24,13 @@ import {
     CoreWSExternalWarning,
     CoreWSUploadFileResult,
 } from '@services/ws';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreTimeUtils } from '@services/utils/time';
-import { CoreUrl } from '@singletons/url';
-import { CoreUtils, CoreUtilsOpenInBrowserOptions } from '@services/utils/utils';
-import { CoreConstants } from '@/core/constants';
+import { CoreTime } from '@static/time';
+import { CoreUrl } from '@static/url';
+import { CoreOpener, CoreOpenerOpenInBrowserOptions } from '@static/opener';
+import { CoreConstants, CoreTimeConstants } from '@/core/constants';
 import { SQLiteDB } from '@classes/sqlitedb';
 import { CoreError } from '@classes/errors/error';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { Translate } from '@singletons';
 import { CoreIonLoadingElement } from '../ion-loading';
 import { CoreSites, CoreSitesReadingStrategy } from '@services/sites';
@@ -54,7 +53,9 @@ import { CoreSiteInfo } from './unauthenticated-site';
 import { CoreAuthenticatedSite, CoreAuthenticatedSiteOptionalData, CoreSiteWSPreSets, WSObservable } from './authenticated-site';
 import { firstValueFrom } from 'rxjs';
 import { CorePlatform } from '@services/platform';
-import { CoreLoadings } from '@services/loadings';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreAlerts } from '@services/overlays/alerts';
 
 /**
  * Class that represents a site (combination of site + user).
@@ -119,7 +120,7 @@ export class CoreSite extends CoreAuthenticatedSite {
         this.setInfo(otherData.info);
         this.calculateOfflineDisabled();
 
-        this.db = CoreDB.getDB('Site-' + this.id);
+        this.db = CoreDB.getDB(`Site-${this.id}`);
     }
 
     /**
@@ -194,6 +195,7 @@ export class CoreSite extends CoreAuthenticatedSite {
      * Check if the user authenticated in the site using an OAuth method.
      *
      * @returns Whether the user authenticated in the site using an OAuth method.
+     * @deprecated since 5.0. Use getOAuthId instead.
      */
     isOAuth(): boolean {
         return this.oauthId != null && this.oauthId !== undefined;
@@ -254,7 +256,7 @@ export class CoreSite extends CoreAuthenticatedSite {
                 jsInitialValue: 0,
             },
             {
-                sql: 'WHERE component = ?' + extraClause,
+                sql: `WHERE component = ?${extraClause}`,
                 sqlParams: params,
                 js: record => record.component === component && (params.length === 1 || record.componentId === componentId),
             },
@@ -267,7 +269,6 @@ export class CoreSite extends CoreAuthenticatedSite {
      *
      * @param component Component name.
      * @param componentId Component id.
-     * @returns Promise resolved when the entries are deleted.
      */
     async deleteComponentFromCache(component: string, componentId?: number): Promise<void> {
         if (!component) {
@@ -283,7 +284,7 @@ export class CoreSite extends CoreAuthenticatedSite {
         await this.cacheTable.delete(params);
     }
 
-    /*
+    /**
      * Uploads a file using Cordova File API.
      *
      * @param filePath File path.
@@ -320,7 +321,7 @@ export class CoreSite extends CoreAuthenticatedSite {
      * @inheritdoc
      */
     async invalidateWsCache(): Promise<void> {
-        this.logger.debug('Invalidate all the cache for site: ' + this.id);
+        this.logger.debug(`Invalidate all the cache for site: ${this.id}`);
 
         try {
             await this.cacheTable.update({ expirationTime: 0 });
@@ -337,7 +338,7 @@ export class CoreSite extends CoreAuthenticatedSite {
             return;
         }
 
-        this.logger.debug('Invalidate cache for key: ' + key);
+        this.logger.debug(`Invalidate cache for key: ${key}`);
 
         await this.cacheTable.update({ expirationTime: 0 }, { key });
     }
@@ -350,11 +351,11 @@ export class CoreSite extends CoreAuthenticatedSite {
             return;
         }
 
-        this.logger.debug('Invalidate cache for key starting with: ' + key);
+        this.logger.debug(`Invalidate cache for key starting with: ${key}`);
 
         await this.cacheTable.updateWhere({ expirationTime: 0 }, {
             sql: 'key LIKE ?',
-            sqlParams: [key + '%'],
+            sqlParams: [`${key}%`],
             js: record => !!record.key?.startsWith(key),
         });
     }
@@ -365,47 +366,47 @@ export class CoreSite extends CoreAuthenticatedSite {
      * @param url The url to be fixed.
      * @returns Promise resolved with the fixed URL.
      */
-    checkAndFixPluginfileURL(url: string): Promise<string> {
-        return this.checkTokenPluginFile(url).then(() => this.fixPluginfileURL(url));
+    async checkAndFixPluginfileURL(url: string): Promise<string> {
+        // Resolve the checking promise to make sure it's finished.
+        await this.checkTokenPluginFile(url);
+
+        // The previous promise (tokenPluginFileWorks) result will be used here.
+        return this.fixPluginfileURL(url);
     }
 
     /**
      * Generic function for adding the wstoken to Moodle urls and for pointing to the correct script.
-     * Uses CoreUtilsProvider.fixPluginfileURL, passing site's token.
+     * Uses CoreUrl.fixPluginfileURL, passing site's token.
      *
      * @param url The url to be fixed.
      * @returns Fixed URL.
      */
     fixPluginfileURL(url: string): string {
         const accessKey = this.tokenPluginFileWorks || this.tokenPluginFileWorks === undefined ?
-            this.infos && this.infos.userprivateaccesskey : undefined;
+            this.getFilesAccessKey() : undefined;
 
         return CoreUrl.fixPluginfileURL(url, this.token || '', this.siteUrl, accessKey);
     }
 
     /**
      * Deletes site's DB.
-     *
-     * @returns Promise to be resolved when the DB is deleted.
      */
     async deleteDB(): Promise<void> {
-        await CoreDB.deleteDB('Site-' + this.id);
+        await CoreDB.deleteDB(`Site-${this.id}`);
     }
 
     /**
      * Deletes site's folder.
-     *
-     * @returns Promise to be resolved when the DB is deleted.
      */
     async deleteFolder(): Promise<void> {
-        if (!CoreFile.isAvailable() || !this.id) {
+        if (!this.id) {
             return;
         }
 
         const siteFolder = CoreFile.getSiteFolder(this.id);
 
         // Ignore any errors, removeDir fails if folder doesn't exists.
-        await CoreUtils.ignoreErrors(CoreFile.removeDir(siteFolder));
+        await CorePromiseUtils.ignoreErrors(CoreFile.removeDir(siteFolder));
     }
 
     /**
@@ -413,14 +414,14 @@ export class CoreSite extends CoreAuthenticatedSite {
      *
      * @returns Promise resolved with the site space usage (size).
      */
-    getSpaceUsage(): Promise<number> {
-        if (CoreFile.isAvailable() && this.id) {
+    async getSpaceUsage(): Promise<number> {
+        if (this.id) {
             const siteFolderPath = CoreFile.getSiteFolder(this.id);
 
             return CoreFile.getDirectorySize(siteFolderPath).catch(() => 0);
-        } else {
-            return Promise.resolve(0);
         }
+
+        return 0;
     }
 
     /**
@@ -465,12 +466,11 @@ export class CoreSite extends CoreAuthenticatedSite {
      * @param url The URL to open.
      * @param alertMessage If defined, an alert will be shown before opening the browser.
      * @param options Other options.
-     * @returns Promise resolved when done, rejected otherwise.
      */
     async openInBrowserWithAutoLogin(
         url: string,
         alertMessage?: string,
-        options: CoreUtilsOpenInBrowserOptions = {},
+        options: CoreOpenerOpenInBrowserOptions = {},
     ): Promise<void> {
         await this.openWithAutoLogin(false, url, options, alertMessage);
     }
@@ -501,7 +501,7 @@ export class CoreSite extends CoreAuthenticatedSite {
     async openWithAutoLogin(
         inApp: boolean,
         url: string,
-        options: InAppBrowserOptions & CoreUtilsOpenInBrowserOptions = {},
+        options: InAppBrowserOptions & CoreOpenerOpenInBrowserOptions = {},
         alertMessage?: string,
     ): Promise<InAppBrowserObject | void> {
         // Get the URL to open.
@@ -509,12 +509,11 @@ export class CoreSite extends CoreAuthenticatedSite {
 
         if (alertMessage) {
             // Show an alert first.
-            const alert = await CoreDomUtils.showAlert(
-                Translate.instant('core.notice'),
-                alertMessage,
-                undefined,
-                3000,
-            );
+            const alert = await CoreAlerts.show({
+                header: Translate.instant('core.notice'),
+                message: alertMessage,
+                autoCloseTime: 3000,
+            });
 
             await alert.onDidDismiss();
             options.showBrowserWarning = false; // A warning already shown, no need to show another.
@@ -535,9 +534,9 @@ export class CoreSite extends CoreAuthenticatedSite {
                 options.clearsessioncache = 'yes';
             }
 
-            return CoreUtils.openInApp(autoLoginUrl, options);
+            return CoreOpener.openInApp(autoLoginUrl, options);
         } else {
-            return CoreUtils.openInBrowser(autoLoginUrl, options);
+            return CoreOpener.openInBrowser(autoLoginUrl, options);
         }
     }
 
@@ -551,10 +550,28 @@ export class CoreSite extends CoreAuthenticatedSite {
      */
     getConfig(name?: undefined, ignoreCache?: boolean): Promise<CoreSiteConfig>;
     getConfig(name: string, ignoreCache?: boolean): Promise<string>;
-    getConfig(name?: string, ignoreCache?: boolean): Promise<string | CoreSiteConfig> {
-        return firstValueFrom(
+    async getConfig(name?: string, ignoreCache?: boolean): Promise<string | CoreSiteConfig> {
+        return await firstValueFrom(
             this.getConfigObservable(<string> name, ignoreCache ? CoreSitesReadingStrategy.ONLY_NETWORK : undefined),
         );
+    }
+
+    /**
+     * Get a boolean config of this site.
+     *
+     * @param name Name of the setting to get.
+     * @param ignoreCache True if it should ignore cached data.
+     * @param defaultValue Default value to return if the config is not found or there's an error.
+     * @returns Promise resolved with the config value.
+     */
+    async getBooleanConfig(name: string, ignoreCache?: boolean, defaultValue = false): Promise<boolean> {
+        try {
+            const value = await this.getConfig(name, ignoreCache);
+
+            return value === '1';
+        } catch {
+            return defaultValue;
+        }
     }
 
     /**
@@ -577,12 +594,12 @@ export class CoreSite extends CoreAuthenticatedSite {
             if (name) {
                 // Return the requested setting.
                 for (const x in config.settings) {
-                    if (config.settings[x].name == name) {
+                    if (config.settings[x].name === name) {
                         return String(config.settings[x].value);
                     }
                 }
 
-                throw new CoreError('Site config not found: ' + name);
+                throw new CoreError(`Site config not found: ${name}`);
             } else {
                 // Return all settings in the same array.
                 const settings: CoreSiteConfig = {};
@@ -597,8 +614,6 @@ export class CoreSite extends CoreAuthenticatedSite {
 
     /**
      * Invalidates config WS call.
-     *
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateConfig(): Promise<void> {
         await this.invalidateWsCacheForKey(this.getConfigCacheKey());
@@ -636,8 +651,8 @@ export class CoreSite extends CoreAuthenticatedSite {
     /**
      * @inheritdoc
      */
-    protected getDisabledFeatures(): string | undefined {
-        return this.config ? this.getStoredConfig('tool_mobile_disabledfeatures') : super.getDisabledFeatures();
+    protected getSiteDisabledFeatures(): string | undefined {
+        return this.config ? this.getStoredConfig('tool_mobile_disabledfeatures') : super.getSiteDisabledFeatures();
     }
 
     /**
@@ -673,7 +688,7 @@ export class CoreSite extends CoreAuthenticatedSite {
      * @param showModal Whether to show a loading modal.
      * @returns Promise resolved with the converted URL.
      */
-    async getAutoLoginUrl(url: string, showModal: boolean = true): Promise<string> {
+    async getAutoLoginUrl(url: string, showModal = true): Promise<string> {
         if (!this.privateToken) {
             // No private token, don't change the URL.
             return url;
@@ -684,13 +699,15 @@ export class CoreSite extends CoreAuthenticatedSite {
             return url;
         }
 
-        if (this.lastAutoLogin > 0) {
-            const timeBetweenRequests = await CoreUtils.ignoreErrors(
-                this.getConfig('tool_mobile_autologinmintimebetweenreq'),
-                CoreConstants.SECONDS_MINUTE * 6,
-            );
+        if (CoreUrl.isTokenPluginFileUrl(url) || CoreUrl.isRefererScriptUrl(url, this.siteUrl)) {
+            // URL doesn't need login or it already has a different login system.
+            return url;
+        }
 
-            if (CoreTimeUtils.timestamp() - this.lastAutoLogin < Number(timeBetweenRequests)) {
+        if (this.lastAutoLogin > 0) {
+            const timeBetweenRequests = await this.getAutoLoginMinTimeBetweenRequests();
+
+            if (CoreTime.timestamp() - this.lastAutoLogin < timeBetweenRequests) {
                 // Not enough time has passed since last auto login.
                 return url;
             }
@@ -715,10 +732,10 @@ export class CoreSite extends CoreAuthenticatedSite {
                 return url;
             }
 
-            this.lastAutoLogin = CoreTimeUtils.timestamp();
+            this.lastAutoLogin = CoreTime.timestamp();
 
             return data.autologinurl + '?userid=' + userId + '&key=' + data.key + '&urltogo=' + encodeURIComponent(url);
-        } catch (error) {
+        } catch {
             // Couldn't get autologin key, return the same URL.
             return url;
         } finally {
@@ -730,7 +747,6 @@ export class CoreSite extends CoreAuthenticatedSite {
      * Deletes a site setting.
      *
      * @param name The config name.
-     * @returns Promise resolved when done.
      */
     async deleteSiteConfig(name: string): Promise<void> {
         await this.configTable.deleteByPrimaryKey({ name });
@@ -762,20 +778,19 @@ export class CoreSite extends CoreAuthenticatedSite {
      *
      * @param name The config name.
      * @param value The config value. Can only store number or strings.
-     * @returns Promise resolved when done.
      */
     async setLocalSiteConfig(name: string, value: number | string): Promise<void> {
         await this.configTable.insert({ name, value });
     }
 
-    /*
+    /**
      * Check if tokenpluginfile script works in the site.
      *
      * @param url URL to check.
      * @returns Promise resolved with boolean: whether it works or not.
      */
     checkTokenPluginFile(url: string): Promise<boolean> {
-        if (!CoreUrl.canUseTokenPluginFile(url, this.siteUrl, this.infos && this.infos.userprivateaccesskey)) {
+        if (!CoreUrl.canUseTokenPluginFile(url, this.siteUrl, this.getFilesAccessKey())) {
             // Cannot use tokenpluginfile.
             return Promise.resolve(false);
         } else if (this.tokenPluginFileWorks !== undefined) {
@@ -804,7 +819,6 @@ export class CoreSite extends CoreAuthenticatedSite {
      * Deletes last viewed records based on some conditions.
      *
      * @param conditions Conditions.
-     * @returns Promise resolved when done.
      */
     async deleteLastViewed(conditions?: Partial<CoreSiteLastViewedDBRecord>): Promise<void> {
         await this.lastViewedTable.delete(conditions);
@@ -855,7 +869,6 @@ export class CoreSite extends CoreAuthenticatedSite {
      * @param id ID.
      * @param value Last viewed item value.
      * @param options Options.
-     * @returns Promise resolved when done.
      */
     async storeLastViewed(
         component: string,
@@ -870,6 +883,72 @@ export class CoreSite extends CoreAuthenticatedSite {
             data: options.data,
             timeaccess: options.timeaccess ?? Date.now(),
         });
+    }
+
+    /**
+     * Get the access key to use to fetch files.
+     *
+     * @returns Access key.
+     */
+    getFilesAccessKey(): string | undefined {
+        return this.infos?.userprivateaccesskey;
+    }
+
+    /**
+     * Get auto-login time between requests.
+     *
+     * @returns Time between requests.
+     */
+    async getAutoLoginMinTimeBetweenRequests(): Promise<number> {
+        const timeBetweenRequests = await CorePromiseUtils.ignoreErrors(
+            this.getConfig('tool_mobile_autologinmintimebetweenreq'),
+            CoreTimeConstants.SECONDS_MINUTE * 6,
+        );
+
+        return Number(timeBetweenRequests);
+    }
+
+    /**
+     * Get last auto login time.
+     * This time is stored in memory, so restarting the app will reset it.
+     *
+     * @returns Last auto login time.
+     */
+    getLastAutoLoginTime(): number {
+        return this.lastAutoLogin;
+    }
+
+    /**
+     * Given a URL, fix it to use a redirect script that will add the referer if possible.
+     *
+     * @param url URL to fix.
+     * @returns Fixed URL or original URL if no need to fix it.
+     */
+    fixRefererForUrl(url: string): string {
+        if (!this.isVersionGreaterEqualThan('5.2')) {
+            // The referer script was added in Moodle 5.2. If the site is older, referer cannot be fixed.
+            return url;
+        }
+
+        return CoreUrl.toRefererScriptUrl(url, this.siteUrl);
+    }
+
+    /**
+     * Get URLs of scripts that are allowed in the user generated content.
+     *
+     * @returns List of allowed script URLs.
+     */
+    getContentAllowedScriptUrls(): string[] {
+        if (!this.isVersionGreaterEqualThan('5.2')) {
+            return [];
+        }
+
+        const allowedScriptsConfig = this.getStoredConfig('tool_mobile_scriptallowlist');
+        if (!allowedScriptsConfig) {
+            return [];
+        }
+
+        return allowedScriptsConfig.split(/(?:\r\n|\r|\n)/).map((url) => url.trim()).filter(url => !!url);
     }
 
 }
@@ -901,6 +980,9 @@ export type CoreSiteConfig = Record<string, string> & {
     supportavailability?: string; // String representation of CoreSiteConfigSupportAvailability.
     searchbanner?: string; // Search banner text.
     searchbannerenable?: string; // Whether search banner is enabled.
+    enabledashboard?: string; // Whether dashboard is enabled.
+    enablemyhome?: string; // @since 5.2. Whether my home is enabled.
+    enablemycourses?: string; // @since 5.2. Whether my courses is enabled.
 };
 
 /**

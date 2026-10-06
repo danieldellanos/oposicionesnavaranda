@@ -22,6 +22,7 @@ import {
     CoreDatabaseQueryOptions,
 } from './database-table';
 import { SubPartial } from '@/core/utils/types';
+import { CoreTimeConstants } from '@/core/constants';
 
 /**
  * Wrapper used to improve performance by caching records that are used often for faster read operations.
@@ -36,7 +37,7 @@ export class CoreLazyDatabaseTable<
     PrimaryKey extends GetDBRecordPrimaryKey<DBRecord, PrimaryKeyColumn> = GetDBRecordPrimaryKey<DBRecord, PrimaryKeyColumn>,
 > extends CoreInMemoryDatabaseTable<DBRecord, PrimaryKeyColumn, RowIdColumn, PrimaryKey> {
 
-    protected readonly DEFAULT_CACHE_LIFETIME = 60000;
+    protected static readonly DEFAULT_CACHE_LIFETIME = CoreTimeConstants.MILLISECONDS_MINUTE;
 
     protected records: Record<string, DBRecord | null> = {};
     protected interval?: number;
@@ -47,7 +48,10 @@ export class CoreLazyDatabaseTable<
     async initialize(): Promise<void> {
         await super.initialize();
 
-        this.interval = window.setInterval(() => (this.records = {}), this.config.lazyCacheLifetime ?? this.DEFAULT_CACHE_LIFETIME);
+        this.interval = window.setInterval(
+            () => (this.records = {}),
+            this.config.lazyCacheLifetime ?? CoreLazyDatabaseTable.DEFAULT_CACHE_LIFETIME,
+        );
     }
 
     /**
@@ -63,8 +67,8 @@ export class CoreLazyDatabaseTable<
      * @inheritdoc
      */
     matchesConfig(config: Partial<CoreDatabaseConfiguration>): boolean {
-        const thisCacheLifetime = this.config.lazyCacheLifetime ?? this.DEFAULT_CACHE_LIFETIME;
-        const otherCacheLifetime = config.lazyCacheLifetime ?? this.DEFAULT_CACHE_LIFETIME;
+        const thisCacheLifetime = this.config.lazyCacheLifetime ?? CoreLazyDatabaseTable.DEFAULT_CACHE_LIFETIME;
+        const otherCacheLifetime = config.lazyCacheLifetime ?? CoreLazyDatabaseTable.DEFAULT_CACHE_LIFETIME;
 
         return super.matchesConfig(config) && thisCacheLifetime === otherCacheLifetime;
     }

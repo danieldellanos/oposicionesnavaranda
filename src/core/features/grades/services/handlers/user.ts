@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { COURSE_PAGE_NAME } from '@features/course/constants';
+import { CORE_COURSE_PAGE_NAME } from '@features/course/constants';
 
 import { CoreGrades } from '@features/grades/services/grades';
 import { CoreUserProfile } from '@features/user/services/user';
@@ -21,14 +21,19 @@ import {
     CoreUserDelegateContext,
     CoreUserProfileHandlerType ,
     CoreUserProfileHandler,
-    CoreUserProfileHandlerData,
+    CoreUserProfileListHandlerData,
 } from '@features/user/services/user-delegate';
 import { PARTICIPANTS_PAGE_NAME } from '@features/user/constants';
 import { CoreNavigator } from '@services/navigator';
 import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CorePromiseUtils } from '@static/promise-utils';
 import { makeSingleton } from '@singletons';
-import { GRADES_PAGE_NAME } from '../grades-helper';
+import {
+    CORE_GRADES_USER_MENU_FEATURE_NAME,
+    CORE_GRADES_COMPONENT_NAME,
+    CORE_GRADES_USER_PROFILE_FEATURE_NAME,
+    GRADES_PAGE_NAME,
+} from '../../constants';
 
 /**
  * Profile grades handler.
@@ -36,9 +41,10 @@ import { GRADES_PAGE_NAME } from '../grades-helper';
 @Injectable({ providedIn: 'root' })
 export class CoreGradesUserHandlerService implements CoreUserProfileHandler {
 
-    name = 'CoreGrades'; // This name doesn't match any disabled feature, they'll be checked in isEnabledForContext.
+    readonly type = CoreUserProfileHandlerType.LIST_ITEM;
+    // This name doesn't match any disabled feature, they'll be checked in isEnabledForContext.
+    name = `${CORE_GRADES_COMPONENT_NAME}:fakename`;
     priority = 500;
-    type = CoreUserProfileHandlerType.LIST_ITEM;
     cacheEnabled = true;
 
     /**
@@ -59,16 +65,15 @@ export class CoreGradesUserHandlerService implements CoreUserProfileHandler {
         }
 
         if (context === CoreUserDelegateContext.USER_MENU) {
-            // This option used to belong to main menu, check the original disabled feature value.
-            if (currentSite.isFeatureDisabled('CoreMainMenuDelegate_CoreGrades')) {
+            if (currentSite.isFeatureDisabled(CORE_GRADES_USER_MENU_FEATURE_NAME)) {
                 return false;
             }
-        } else if (currentSite.isFeatureDisabled('CoreUserDelegate_CoreGrades:viewGrades')) {
+        } else if (currentSite.isFeatureDisabled(CORE_GRADES_USER_PROFILE_FEATURE_NAME)) {
             return false;
         }
 
         if (context === CoreUserDelegateContext.COURSE) {
-            return CoreUtils.ignoreErrors(CoreGrades.isPluginEnabledForCourse(courseId), false);
+            return CorePromiseUtils.ignoreErrors(CoreGrades.isPluginEnabledForCourse(courseId), false);
         } else {
             return CoreGrades.isCourseGradesEnabled();
         }
@@ -79,17 +84,17 @@ export class CoreGradesUserHandlerService implements CoreUserProfileHandler {
      */
     async isEnabledForUser(user: CoreUserProfile, context: CoreUserDelegateContext, contextId: number): Promise<boolean> {
         if (context === CoreUserDelegateContext.COURSE) {
-            return CoreUtils.promiseWorks(CoreGrades.getCourseGradesTable(contextId, user.id));
+            return CorePromiseUtils.promiseWorks(CoreGrades.getCourseGradesTable(contextId, user.id));
         }
 
         // All course grades only available for the current user.
-        return user.id == CoreSites.getCurrentSiteUserId();
+        return user.id === CoreSites.getCurrentSiteUserId();
     }
 
     /**
      * @inheritdoc
      */
-    getDisplayData(user: CoreUserProfile, context: CoreUserDelegateContext): CoreUserProfileHandlerData {
+    getDisplayData(user: CoreUserProfile, context: CoreUserDelegateContext): CoreUserProfileListHandlerData {
         if (context === CoreUserDelegateContext.COURSE) {
             return {
                 icon: 'fas-chart-bar',
@@ -99,7 +104,7 @@ export class CoreGradesUserHandlerService implements CoreUserProfileHandler {
                     event.preventDefault();
                     event.stopPropagation();
                     CoreNavigator.navigateToSitePath(
-                        [COURSE_PAGE_NAME, contextId, PARTICIPANTS_PAGE_NAME, user.id, GRADES_PAGE_NAME].join('/'),
+                        [CORE_COURSE_PAGE_NAME, contextId, PARTICIPANTS_PAGE_NAME, user.id, GRADES_PAGE_NAME].join('/'),
                     );
                 },
             };

@@ -14,13 +14,15 @@
 
 import { Injectable } from '@angular/core';
 
-import { CoreUtils } from '@services/utils/utils';
+import { CoreUtils } from '@static/utils';
 import { CorePushNotificationsClickHandler } from '@features/pushnotifications/services/push-delegate';
 import { AddonBadges } from '../badges';
 import { makeSingleton } from '@singletons';
 import { CorePushNotificationsNotificationBasicData } from '@features/pushnotifications/services/pushnotifications';
 import { CoreNavigator } from '@services/navigator';
 import { AddonBadgesHelper } from '../badges-helper';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { ADDONS_BADGES_USER_PROFILE_FEATURE_NAME } from '@addons/badges/constants';
 
 /**
  * Handler for badges push notifications clicks.
@@ -30,13 +32,10 @@ export class AddonBadgesPushClickHandlerService implements CorePushNotifications
 
     name = 'AddonBadgesPushClickHandler';
     priority = 200;
-    featureName = 'CoreUserDelegate_AddonBadges';
+    featureName = ADDONS_BADGES_USER_PROFILE_FEATURE_NAME;
 
     /**
-     * Check if a notification click is handled by this handler.
-     *
-     * @param notification The notification to check.
-     * @returns Whether the notification click is handled by this handler
+     * @inheritdoc
      */
     async handles(notification: CorePushNotificationsNotificationBasicData): Promise<boolean> {
         const data = notification.customdata || {};
@@ -54,10 +53,7 @@ export class AddonBadgesPushClickHandlerService implements CorePushNotifications
     }
 
     /**
-     * Handle the notification click.
-     *
-     * @param notification The notification to check.
-     * @returns Promise resolved when done.
+     * @inheritdoc
      */
     async handleClick(notification: CorePushNotificationsNotificationBasicData): Promise<void> {
         const data = notification.customdata || {};
@@ -72,7 +68,7 @@ export class AddonBadgesPushClickHandlerService implements CorePushNotifications
         }
 
         // No hash, open the list of user badges.
-        await CoreUtils.ignoreErrors(
+        await CorePromiseUtils.ignoreErrors(
             AddonBadges.invalidateUserBadges(
                 0,
                 Number(notification.usertoid),

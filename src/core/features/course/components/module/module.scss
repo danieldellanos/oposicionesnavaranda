@@ -10,14 +10,28 @@
     --activity-border: 1px solid var(--stroke);
     --card-padding-bottom: var(--vertical-spacing);
 
+    &:last-child {
+        --activity-border: 0px;
+        --card-padding-bottom: 0px;
+    }
+
     ion-card {
-        margin: var(--vertical-spacing) var(--horizontal-spacing);
-        padding: 0px;
+        margin: var(--vertical-spacing) 0px;
+        padding: 0px var(--horizontal-spacing) var(--card-padding-bottom) var(--horizontal-spacing);
         --ion-card-border-width: var(--card-border-width);
         --ion-card-radius: var(--card-radius);
         --ion-card-background: var(--card-background);
-        padding-bottom: var(--card-padding-bottom);
         border-bottom: var(--activity-border);
+    }
+
+    ion-badge {
+        @include margin-horizontal(null, 4px);
+        font: var(--mdl-typography-body-font-sm);
+        display: inline-flex;
+        align-items: center;
+        ion-icon {
+            @include margin-horizontal(0px, 4px);
+        }
     }
 
     ion-item {
@@ -91,19 +105,6 @@
         .core-module-buttons {
             margin-top: var(--vertical-spacing);
             margin-bottom: var(--vertical-spacing);
-        }
-
-        .core-module-additional-info {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-top: 4px;
-            margin-bottom: 4px;
-
-            ion-badge {
-                @include margin-horizontal(null, 4px);
-                font: var(--mdl-typography-body-font-sm);
-            }
         }
     }
 
@@ -200,7 +201,7 @@
     }
 
     &.indented ion-card {
-        @include margin-horizontal(calc(var(--horizontal-spacing) + 1rem), null);
+        @include padding-horizontal(calc(var(--horizontal-spacing) + 1rem), null);
     }
 
     // Hide download folder icon meanwhile MOBILE-4147 is not solved
@@ -216,5 +217,10 @@
         .core-module-availabilityinfo {
             background: var(--gray-800);
         }
+    }
+
+    .colored-box-with-icon.core-course-last-module-viewed {
+        background-color: var(--info-shade);
+        color: var(--info-tint);
     }
 }

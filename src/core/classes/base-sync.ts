@@ -15,10 +15,10 @@
 import { CoreNetwork } from '@services/network';
 import { CoreSites } from '@services/sites';
 import { CoreSync } from '@services/sync';
-import { CoreText } from '@singletons/text';
-import { CoreTimeUtils } from '@services/utils/time';
+import { CoreText } from '@static/text';
+import { CoreTime } from '@static/time';
 import { Translate } from '@singletons';
-import { CoreLogger } from '@singletons/logger';
+import { CoreLogger } from '@static/logger';
 import { CoreAnyError, CoreError } from '@classes/errors/error';
 import { CoreErrorHelper } from '@services/error-helper';
 
@@ -164,7 +164,7 @@ export class CoreSyncBaseProvider<T = void> {
         if (!timestamp) {
             return Translate.instant('core.never');
         } else {
-            return CoreTimeUtils.userDate(timestamp);
+            return CoreTime.userDate(timestamp);
         }
     }
 
@@ -209,7 +209,7 @@ export class CoreSyncBaseProvider<T = void> {
      * @returns Unique identifier from component and id.
      */
     protected getUniqueSyncId(id: string | number): string {
-        return this.component + '#' + id;
+        return `${this.component}#${id}`;
     }
 
     /**
@@ -247,7 +247,7 @@ export class CoreSyncBaseProvider<T = void> {
     async setSyncTime(id: string | number, siteId?: string, time?: number): Promise<void> {
         time = time !== undefined ? time : Date.now();
 
-        await CoreSync.insertOrUpdateSyncRecord(this.component, id, { time: time }, siteId);
+        await CoreSync.insertOrUpdateSyncRecord(this.component, id, { time }, siteId);
     }
 
     /**

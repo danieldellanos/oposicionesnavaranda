@@ -18,17 +18,20 @@ import { CoreSyncBaseProvider } from '@classes/base-sync';
 
 import { CoreSites } from '@services/sites';
 import { CoreNetwork } from '@services/network';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreWSError } from '@classes/errors/wserror';
 import { CoreErrorHelper } from '@services/error-helper';
 import { CoreCourseOffline } from './course-offline';
-import { CoreCourse } from './course';
+import { CoreCourse, CoreCourseCompletionActivityStatus } from './course';
 import { CoreCourseLogHelper } from './log-helper';
 import { CoreWSExternalWarning } from '@services/ws';
 import { CoreCourseManualCompletionDBRecord } from './database/course';
 import { CoreNetworkError } from '@classes/errors/network-error';
 import { makeSingleton, Translate } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import { CoreCourses } from '@features/courses/services/courses';
+import { CORE_COURSE_AUTO_SYNCED, CoreCourseModuleCompletionStatus, CoreCourseModuleCompletionTracking } from '../constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreTime } from '@static/time';
 
 /**
  * Service to sync course offline data. This only syncs the offline data of the course itself, not the offline data of
@@ -36,8 +39,6 @@ import { CoreCourses } from '@features/courses/services/courses';
  */
 @Injectable({ providedIn: 'root' })
 export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncResult> {
-
-    static readonly AUTO_SYNCED = 'core_course_autom_synced';
 
     constructor() {
         super('CoreCourseSyncProvider');
@@ -47,7 +48,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
      * Try to synchronize all the courses in a certain site or in all sites.
      *
      * @param siteId Site ID to sync. If not defined, sync all sites.
-     * @param force Wether the execution is forced (manual sync).
+     * @param force Whether the execution is forced (manual sync).
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
     syncAllCourses(siteId?: string, force?: boolean): Promise<void> {
@@ -57,7 +58,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
     /**
      * Sync all courses on a site.
      *
-     * @param force Wether the execution is forced (manual sync).
+     * @param force Whether the execution is forced (manual sync).
      * @param siteId Site ID to sync.
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
@@ -72,7 +73,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
      * Sync courses offline completion.
      *
      * @param siteId Site ID to sync.
-     * @param force Wether the execution is forced (manual sync).
+     * @param force Whether the execution is forced (manual sync).
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
     protected async syncCoursesCompletion(siteId: string, force: boolean): Promise<void> {
@@ -83,7 +84,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
         // Sync all courses.
         await Promise.all(completions.map(async (completion) => {
             if (courseNames[completion.courseid] === undefined) {
-                const course = await CoreUtils.ignoreErrors(CoreCourses.getUserCourse(completion.courseid, true, siteId));
+                const course = await CorePromiseUtils.ignoreErrors(CoreCourses.getUserCourse(completion.courseid, true, siteId));
 
                 courseNames[completion.courseid] = course?.displayname || course?.fullname;
             }
@@ -96,7 +97,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
             }
 
             // Sync successful, send event.
-            CoreEvents.trigger(CoreCourseSyncProvider.AUTO_SYNCED, {
+            CoreEvents.trigger(CORE_COURSE_AUTO_SYNCED, {
                 courseId: completion.courseid,
                 warnings: result.warnings,
             }, siteId);
@@ -154,7 +155,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
         };
 
         // Get offline responses to be sent.
-        const completions = await CoreUtils.ignoreErrors(
+        const completions = await CorePromiseUtils.ignoreErrors(
             CoreCourseOffline.getCourseManualCompletions(courseId, siteId),
             <CoreCourseManualCompletionDBRecord[]> [],
         );
@@ -185,7 +186,7 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
 
         // Send all the completions.
         await Promise.all(completions.map(async (entry) => {
-            const onlineComp = onlineCompletions[entry.cmid];
+            const onlineComp = onlineCompletions[entry.cmid] as CoreCourseCompletionActivityStatus | undefined;
 
             // Check if the completion was modified in online. If so, discard it.
             if (onlineComp && onlineComp.timecompleted * 1000 > entry.timecompleted) {
@@ -205,14 +206,19 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
                 return;
             }
 
+            let newState = onlineComp?.state;
             try {
                 await CoreCourse.markCompletedManuallyOnline(entry.cmid, !!entry.completed, siteId);
+
+                newState = entry.completed
+                    ? CoreCourseModuleCompletionStatus.COMPLETION_COMPLETE
+                    : CoreCourseModuleCompletionStatus.COMPLETION_INCOMPLETE;
 
                 result.updated = true;
 
                 await CoreCourseOffline.deleteManualCompletion(entry.cmid, siteId);
             } catch (error) {
-                if (!CoreUtils.isWebServiceError(error)) {
+                if (!CoreWSError.isWebServiceError(error)) {
                     // Couldn't connect to server, reject.
                     throw error;
                 }
@@ -230,6 +236,25 @@ export class CoreCourseSyncProvider extends CoreSyncBaseProvider<CoreCourseSyncR
                         error: CoreErrorHelper.getErrorMessageFromError(error),
                     }),
                 });
+            } finally {
+                if (newState !== undefined) {
+                    const completion = onlineComp
+                        ? {
+                            ...onlineComp,
+                            state: newState,
+                            courseId,
+                        }
+                        : {
+                            cmid: entry.cmid,
+                            state: newState,
+                            courseId,
+                            timecompleted: CoreTime.timestamp(),
+                            overrideby: 0,
+                            tracking: CoreCourseModuleCompletionTracking.MANUAL,
+                        };
+
+                    CoreEvents.trigger(CoreEvents.MANUAL_COMPLETION_CHANGED, { completion });
+                }
             }
         }));
 
@@ -270,9 +295,22 @@ export type CoreCourseSyncResult = {
 };
 
 /**
- * Data passed to AUTO_SYNCED event.
+ * Data passed to CORE_COURSE_AUTO_SYNCED event.
  */
 export type CoreCourseAutoSyncData = {
     courseId: number;
     warnings: CoreWSExternalWarning[];
 };
+
+declare module '@static/events' {
+
+    /**
+     * Augment CoreEventsData interface with events specific to this service.
+     *
+     * @see https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation
+     */
+    export interface CoreEventsData {
+        [CORE_COURSE_AUTO_SYNCED]: CoreCourseAutoSyncData;
+    }
+
+}

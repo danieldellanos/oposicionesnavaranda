@@ -14,15 +14,14 @@
 
 import { AddonModDataEntryField, AddonModDataField, AddonModDataSubfieldData } from '@addons/mod/data/services/data';
 import { Injectable, Type } from '@angular/core';
-import { CoreFormFields } from '@singletons/form';
-import { CoreText } from '@singletons/text';
+import { CoreFormFields } from '@static/form';
+import { CoreText } from '@static/text';
 import { CoreWSFile } from '@services/ws';
 import { makeSingleton, Translate } from '@singletons';
 import { AddonModDataFieldTextHandlerService } from '../../text/services/handler';
-import { AddonModDataFieldTextareaComponent } from '../component/textarea';
 import { CoreFileEntry, CoreFileHelper } from '@services/file-helper';
 import type { AddonModDataFieldPluginBaseComponent } from '@addons/mod/data/classes/base-field-plugin-component';
-import { CoreDom } from '@singletons/dom';
+import { CoreDom } from '@static/dom';
 
 /**
  * Handler for textarea data field plugin.
@@ -36,7 +35,9 @@ export class AddonModDataFieldTextareaHandlerService extends AddonModDataFieldTe
     /**
      * @inheritdoc
      */
-    getComponent(): Type<AddonModDataFieldPluginBaseComponent> {
+    async getComponent(): Promise<Type<AddonModDataFieldPluginBaseComponent>> {
+        const { AddonModDataFieldTextareaComponent } = await import('../component/textarea');
+
         return AddonModDataFieldTextareaComponent;
     }
 
@@ -48,7 +49,7 @@ export class AddonModDataFieldTextareaHandlerService extends AddonModDataFieldTe
         inputData: CoreFormFields<string>,
         originalFieldData: AddonModDataEntryField,
     ): AddonModDataSubfieldData[] {
-        const fieldName = 'f_' + field.id;
+        const fieldName = `f_${field.id}`;
         const files = this.getFieldEditFiles(field, inputData, originalFieldData);
 
         let text = CoreFileHelper.restorePluginfileUrls(inputData[fieldName] || '', <CoreWSFile[]> files);

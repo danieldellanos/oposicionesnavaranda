@@ -14,11 +14,14 @@
 
 import { Injectable, Type } from '@angular/core';
 
-import { CoreConstants, ModPurpose } from '@/core/constants';
 import { CoreCourseModuleHandler } from '@features/course/services/module-delegate';
 import { makeSingleton } from '@singletons';
 import { CoreModuleHandlerBase } from '@features/course/classes/module-base-handler';
-import { ADDON_MOD_LESSON_PAGE_NAME } from '../../constants';
+import { ADDON_MOD_LESSON_MODNAME, ADDON_MOD_LESSON_PAGE_NAME } from '../../constants';
+import { ModFeature, ModPurpose } from '@addons/mod/constants';
+import { AddonModLesson } from '../lesson';
+import { CoreCourseModuleData } from '@features/course/services/course-helper';
+import { CoreSitesReadingStrategy } from '@services/sites';
 
 /**
  * Handler to support lesson modules.
@@ -27,20 +30,20 @@ import { ADDON_MOD_LESSON_PAGE_NAME } from '../../constants';
 export class AddonModLessonModuleHandlerService extends CoreModuleHandlerBase implements CoreCourseModuleHandler {
 
     name = 'AddonModLesson';
-    modName = 'lesson';
+    modName = ADDON_MOD_LESSON_MODNAME;
     protected pageName = ADDON_MOD_LESSON_PAGE_NAME;
 
     supportedFeatures = {
-        [CoreConstants.FEATURE_GROUPS]: true,
-        [CoreConstants.FEATURE_GROUPINGS]: true,
-        [CoreConstants.FEATURE_MOD_INTRO]: true,
-        [CoreConstants.FEATURE_COMPLETION_TRACKS_VIEWS]: true,
-        [CoreConstants.FEATURE_COMPLETION_HAS_RULES]: true,
-        [CoreConstants.FEATURE_GRADE_HAS_GRADE]: true,
-        [CoreConstants.FEATURE_GRADE_OUTCOMES]: true,
-        [CoreConstants.FEATURE_BACKUP_MOODLE2]: true,
-        [CoreConstants.FEATURE_SHOW_DESCRIPTION]: true,
-        [CoreConstants.FEATURE_MOD_PURPOSE]: ModPurpose.MOD_PURPOSE_INTERACTIVECONTENT,
+        [ModFeature.GROUPS]: true,
+        [ModFeature.GROUPINGS]: true,
+        [ModFeature.MOD_INTRO]: true,
+        [ModFeature.COMPLETION_TRACKS_VIEWS]: true,
+        [ModFeature.COMPLETION_HAS_RULES]: true,
+        [ModFeature.GRADE_HAS_GRADE]: true,
+        [ModFeature.GRADE_OUTCOMES]: true,
+        [ModFeature.BACKUP_MOODLE2]: true,
+        [ModFeature.SHOW_DESCRIPTION]: true,
+        [ModFeature.MOD_PURPOSE]: ModPurpose.INTERACTIVECONTENT,
     };
 
     /**
@@ -50,6 +53,19 @@ export class AddonModLessonModuleHandlerService extends CoreModuleHandlerBase im
         const { AddonModLessonIndexComponent } = await import('../../components/index');
 
         return AddonModLessonIndexComponent;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    async getModuleForcedLang(module: CoreCourseModuleData): Promise<string | undefined> {
+        const mod = await AddonModLesson.getLesson(
+            module.course,
+            module.id,
+            { readingStrategy: CoreSitesReadingStrategy.PREFER_CACHE },
+        );
+
+        return mod?.lang;
     }
 
 }

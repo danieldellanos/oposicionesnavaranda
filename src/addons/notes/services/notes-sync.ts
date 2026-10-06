@@ -15,26 +15,26 @@
 import { Injectable } from '@angular/core';
 import { CoreSyncBaseProvider } from '@classes/base-sync';
 import { CoreNetworkError } from '@classes/errors/network-error';
-import { CoreCourses } from '@features/courses/services/courses';
 import { CoreNetwork } from '@services/network';
 import { CoreSites } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreWSError } from '@classes/errors/wserror';
 import { Translate, makeSingleton } from '@singletons';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import { AddonNotesDBRecord, AddonNotesDeletedDBRecord } from './database/notes';
 import { AddonNotes, AddonNotesCreateNoteData } from './notes';
 import { AddonNotesOffline } from './notes-offline';
-import { CoreArray } from '@singletons/array';
+import { CoreArray } from '@static/array';
 import { CoreAnyError } from '@classes/errors/error';
 import { CoreErrorHelper } from '@services/error-helper';
+import { ADDON_NOTES_AUTO_SYNCED } from './constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { DEFAULT_TEXT_FORMAT } from '@static/text';
 
 /**
  * Service to sync notes.
  */
 @Injectable( { providedIn: 'root' } )
 export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncResult> {
-
-    static readonly AUTO_SYNCED = 'addon_notes_autom_synced';
 
     constructor() {
         super('AddonNotesSync');
@@ -44,7 +44,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
      * Try to synchronize all the notes in a certain site or in all sites.
      *
      * @param siteId Site ID to sync. If not defined, sync all sites.
-     * @param force Wether to force sync not depending on last execution.
+     * @param force Whether to force sync not depending on last execution.
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
     syncAllNotes(siteId?: string, force?: boolean): Promise<void> {
@@ -54,7 +54,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
     /**
      * Synchronize all the notes in a certain site
      *
-     * @param force Wether to force sync not depending on last execution.
+     * @param force Whether to force sync not depending on last execution.
      * @param siteId Site ID to sync.
      * @returns Promise resolved if sync is successful, rejected if sync fails.
      */
@@ -80,7 +80,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
 
             if (result !== undefined) {
                 // Sync successful, send event.
-                CoreEvents.trigger(AddonNotesSyncProvider.AUTO_SYNCED, {
+                CoreEvents.trigger(ADDON_NOTES_AUTO_SYNCED, {
                     courseId,
                     warnings: result.warnings,
                 }, siteId);
@@ -121,7 +121,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
             return currentSyncPromise;
         }
 
-        this.logger.debug('Try to sync notes for course ' + courseId);
+        this.logger.debug(`Try to sync notes for course ${courseId}`);
 
         const syncPromise = this.performSyncNotes(courseId, siteId);
 
@@ -165,7 +165,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
             publishstate: note.publishstate,
             courseid: note.courseid,
             text: note.content,
-            format: 1,
+            format: DEFAULT_TEXT_FORMAT,
         }));
 
         // Send the notes.
@@ -179,7 +179,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
 
             return;
         }).catch((error) => {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // It's a WebService error, this means the user cannot send notes.
                 errors.push(error);
 
@@ -203,7 +203,7 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
 
         // Delete the notes.
         promises.push(AddonNotes.deleteNotesOnline(notesToDelete, courseId, siteId).catch((error) => {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // It's a WebService error, this means the user cannot send notes.
                 errors.push(error);
 
@@ -224,17 +224,13 @@ export class AddonNotesSyncProvider extends CoreSyncBaseProvider<AddonNotesSyncR
         await Promise.all(promises);
 
         // Fetch the notes from server to be sure they're up to date.
-        await CoreUtils.ignoreErrors(AddonNotes.invalidateNotes(courseId, undefined, siteId));
+        await CorePromiseUtils.ignoreErrors(AddonNotes.invalidateNotes(courseId, undefined, siteId));
 
-        await CoreUtils.ignoreErrors(AddonNotes.getNotes(courseId, undefined, false, true, siteId));
+        await CorePromiseUtils.ignoreErrors(AddonNotes.getNotes(courseId, undefined, false, true, siteId));
 
         if (errors && errors.length) {
-            // At least an error occurred, get course name and add errors to warnings array.
-            const course = await CoreUtils.ignoreErrors(CoreCourses.getUserCourse(courseId, true, siteId), {});
-
             result.warnings = errors.map((error) =>
                 Translate.instant('addon.notes.warningnotenotsent', {
-                    course: 'fullname' in course ? course.fullname : courseId, // @deprecated since 4.3.
                     error: CoreErrorHelper.getErrorMessageFromError(error),
                 }));
         }
@@ -251,14 +247,14 @@ export type AddonNotesSyncResult = {
 };
 
 /**
- * Data passed to AUTO_SYNCED event.
+ * Data passed to ADDON_NOTES_AUTO_SYNCED event.
  */
 export type AddonNotesSyncAutoSyncData = {
     courseId: number;
     warnings: string[];
 };
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -266,7 +262,7 @@ declare module '@singletons/events' {
      * @see https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation
      */
     export interface CoreEventsData {
-        [AddonNotesSyncProvider.AUTO_SYNCED]: AddonNotesSyncAutoSyncData;
+        [ADDON_NOTES_AUTO_SYNCED]: AddonNotesSyncAutoSyncData;
     }
 
 }

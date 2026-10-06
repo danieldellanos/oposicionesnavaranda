@@ -16,7 +16,7 @@ import { Injectable, Type } from '@angular/core';
 
 import { CoreDelegate, CoreDelegateHandler } from '@classes/delegate';
 import { CoreError } from '@classes/errors/error';
-import { AuthEmailSignupProfileField } from '@features/login/services/login-helper';
+import { AuthEmailSignupProfileField } from '@features/login/services/signup';
 import { makeSingleton } from '@singletons';
 import { CoreUserProfileField } from './user';
 
@@ -54,7 +54,7 @@ export interface CoreUserProfileFieldHandler extends CoreDelegateHandler {
     ): Promise<CoreUserProfileFieldHandlerData | undefined>;
 }
 
-export interface CoreUserProfileFieldHandlerData {
+export type CoreUserProfileFieldHandlerData = {
     /**
      * Name of the custom field.
      */
@@ -69,7 +69,7 @@ export interface CoreUserProfileFieldHandlerData {
      * Value of the custom field.
      */
     value: unknown;
-}
+};
 
 /**
  * Service to interact with user profile fields.
@@ -78,10 +78,6 @@ export interface CoreUserProfileFieldHandlerData {
 export class CoreUserProfileFieldDelegateService extends CoreDelegate<CoreUserProfileFieldHandler> {
 
     protected handlerNameProperty = 'type';
-
-    constructor() {
-        super('CoreUserProfileFieldDelegate');
-    }
 
     /**
      * Get the type of a field.
@@ -136,7 +132,7 @@ export class CoreUserProfileFieldDelegateService extends CoreDelegate<CoreUserPr
         const handler = this.getHandler(type, !signup);
 
         if (handler) {
-            const name = 'profile_field_' + field.shortname;
+            const name = `profile_field_${field.shortname}`;
 
             if (handler.getData) {
                 return handler.getData(field, signup, registerAuth, formValues);
@@ -164,8 +160,8 @@ export class CoreUserProfileFieldDelegateService extends CoreDelegate<CoreUserPr
      */
     async getDataForFields(
         fields: (AuthEmailSignupProfileField | CoreUserProfileField)[] | undefined,
-        signup: boolean = false,
-        registerAuth: string = '',
+        signup = false,
+        registerAuth = '',
         formValues: Record<string, unknown>,
     ): Promise<CoreUserProfileFieldHandlerData[]> {
         if (!fields) {

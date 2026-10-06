@@ -14,7 +14,6 @@
 
 import { Injectable } from '@angular/core';
 import { CoreError } from '@classes/errors/error';
-import { CoreSite } from '@classes/sites/site';
 import { CoreCourseCommonModWSOptions } from '@features/course/services/course';
 import { CoreCourseLogHelper } from '@features/course/services/log-helper';
 import { CoreRatingInfo } from '@features/rating/services/rating';
@@ -23,22 +22,25 @@ import { CoreNetwork } from '@services/network';
 import { CoreFileEntry } from '@services/file-helper';
 import { CoreFilepool } from '@services/filepool';
 import { CoreSites, CoreSitesCommonWSOptions, CoreSitesReadingStrategy } from '@services/sites';
-import { CoreUtils } from '@services/utils/utils';
+import { CoreArray } from '@static/array';
 import { CoreWSExternalFile, CoreWSExternalWarning } from '@services/ws';
-import { makeSingleton, Translate } from '@singletons';
+import { makeSingleton } from '@singletons';
 import { AddonModDataFieldsDelegate } from './data-fields-delegate';
 import { AddonModDataOffline } from './data-offline';
-import { AddonModDataAutoSyncData } from './data-sync';
 import { CoreSiteWSPreSets } from '@classes/sites/authenticated-site';
 import {
-    ADDON_MOD_DATA_AUTO_SYNCED,
-    ADDON_MOD_DATA_COMPONENT,
+    ADDON_MOD_DATA_COMPONENT_LEGACY,
     ADDON_MOD_DATA_ENTRIES_PER_PAGE,
     ADDON_MOD_DATA_ENTRY_CHANGED,
     AddonModDataAction,
 } from '../constants';
+import { CoreCacheUpdateFrequency } from '@/core/constants';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreWSError } from '@classes/errors/wserror';
+import { CoreTextFormat } from '@static/text';
+import { CoreCourseModuleHelper } from '@features/course/services/course-module-helper';
 
-declare module '@singletons/events' {
+declare module '@static/events' {
 
     /**
      * Augment CoreEventsData interface with events specific to this service.
@@ -46,7 +48,6 @@ declare module '@singletons/events' {
      * @see https://www.typescriptlang.org/docs/handbook/declaration-merging.html#module-augmentation
      */
     export interface CoreEventsData {
-        [ADDON_MOD_DATA_AUTO_SYNCED]: AddonModDataAutoSyncData;
         [ADDON_MOD_DATA_ENTRY_CHANGED]: AddonModDataEntryChangedEventData;
     }
 }
@@ -77,10 +78,10 @@ export class AddonModDataProvider {
         entryId: number,
         courseId: number,
         contents: AddonModDataEntryWSField[],
-        groupId: number = 0,
+        groupId = 0,
         fields: AddonModDataField[],
         siteId?: string,
-        forceOffline: boolean = false,
+        forceOffline = false,
     ): Promise<AddonModDataAddEntryResult> {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
@@ -126,7 +127,7 @@ export class AddonModDataProvider {
 
             return result;
         } catch (error) {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // The WebService has thrown an error, this means that responses cannot be submitted.
                 throw error;
             }
@@ -215,7 +216,7 @@ export class AddonModDataProvider {
                 sent: true,
             };
         } catch (error) {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // The WebService has thrown an error, this means that responses cannot be submitted.
                 throw error;
             }
@@ -252,7 +253,7 @@ export class AddonModDataProvider {
      */
     protected checkFields(fields: AddonModDataField[], contents: AddonModDataSubfieldData[]): AddonModDataFieldNotification[] {
         const notifications: AddonModDataFieldNotification[] = [];
-        const contentsIndexed = CoreUtils.arrayToObjectMultiple(contents, 'fieldid');
+        const contentsIndexed = CoreArray.toObjectMultiple(contents, 'fieldid');
 
         // App is offline, check required fields.
         fields.forEach((field) => {
@@ -310,7 +311,7 @@ export class AddonModDataProvider {
         try {
             await this.deleteEntryOnline(entryId, siteId);
         } catch (error) {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // The WebService has thrown an error, this means that responses cannot be submitted.
                 throw error;
             }
@@ -382,7 +383,7 @@ export class AddonModDataProvider {
         contents: AddonModDataEntryWSField[],
         fields: AddonModDataField[],
         siteId?: string,
-        forceOffline: boolean = false,
+        forceOffline = false,
     ): Promise<AddonModDataEditEntryResult> {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
@@ -426,7 +427,7 @@ export class AddonModDataProvider {
 
             return result;
         } catch (error) {
-            if (CoreUtils.isWebServiceError(error)) {
+            if (CoreWSError.isWebServiceError(error)) {
                 // The WebService has thrown an error, this means that responses cannot be submitted.
                 throw error;
             }
@@ -467,12 +468,12 @@ export class AddonModDataProvider {
      */
     fetchAllEntries(dataId: number, options: AddonModDataGetEntriesOptions = {}): Promise<AddonModDataEntry[]> {
         options.siteId = options.siteId || CoreSites.getCurrentSiteId();
-        options = Object.assign({
-            page: 0,
-            perPage: ADDON_MOD_DATA_ENTRIES_PER_PAGE,
-        }, options);
+        const pageOptions = {
+            perPage: options.perPage ?? ADDON_MOD_DATA_ENTRIES_PER_PAGE,
+            page: options.page ?? 0,
+        };
 
-        return this.fetchEntriesRecursive(dataId, [], options);
+        return this.fetchEntriesRecursive(dataId, [], options, pageOptions);
     }
 
     /**
@@ -481,21 +482,25 @@ export class AddonModDataProvider {
      * @param dataId Data ID.
      * @param entries Entries already fetch (just to concatenate them).
      * @param options Other options.
+     * @param pageOptions Pagination options.
+     * @param pageOptions.perPage Number of entries per page.
+     * @param pageOptions.page Page number.
      * @returns Promise resolved when done.
      */
     protected async fetchEntriesRecursive(
         dataId: number,
         entries: AddonModDataEntry[],
         options: AddonModDataGetEntriesOptions,
+        pageOptions: { perPage: number; page: number },
     ): Promise<AddonModDataEntry[]> {
         const result = await this.getEntries(dataId, options);
         entries = entries.concat(result.entries);
 
-        const canLoadMore = options.perPage! > 0 && ((options.page! + 1) * options.perPage!) < result.totalcount;
+        const canLoadMore = pageOptions.perPage > 0 && ((pageOptions.page + 1) * pageOptions.perPage) < result.totalcount;
         if (canLoadMore) {
-            options.page!++;
+            pageOptions.page++;
 
-            return this.fetchEntriesRecursive(dataId, entries, options);
+            return this.fetchEntriesRecursive(dataId, entries, options, pageOptions);
         }
 
         return entries;
@@ -508,7 +513,7 @@ export class AddonModDataProvider {
      * @returns Cache key.
      */
     protected getDatabaseDataCacheKey(courseId: number): string {
-        return AddonModDataProvider.ROOT_CACHE_KEY + 'data:' + courseId;
+        return `${AddonModDataProvider.ROOT_CACHE_KEY}data:${courseId}`;
     }
 
     /**
@@ -532,7 +537,7 @@ export class AddonModDataProvider {
      */
     protected async getDatabaseByKey(
         courseId: number,
-        key: string,
+        key: 'id' | 'coursemodule',
         value: number,
         options: CoreSitesCommonWSOptions = {},
     ): Promise<AddonModDataData> {
@@ -543,19 +548,14 @@ export class AddonModDataProvider {
         };
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getDatabaseDataCacheKey(courseId),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_DATA_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_DATA_COMPONENT_LEGACY,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
         const response =
             await site.read<AddonModDataGetDatabasesByCoursesWSResponse>('mod_data_get_databases_by_courses', params, preSets);
 
-        const currentData = response.databases.find((data) => data[key] == value);
-        if (currentData) {
-            return currentData;
-        }
-
-        throw new CoreError(Translate.instant('core.course.modulenotfound'));
+        return CoreCourseModuleHelper.getActivityByField(response.databases, key, value);
     }
 
     /**
@@ -599,7 +599,7 @@ export class AddonModDataProvider {
      * @param groupId Group ID.
      * @returns Cache key.
      */
-    protected getDatabaseAccessInformationDataCacheKey(dataId: number, groupId: number = 0): string {
+    protected getDatabaseAccessInformationDataCacheKey(dataId: number, groupId = 0): string {
         return this.getDatabaseAccessInformationDataPrefixCacheKey(dataId) + groupId;
     }
 
@@ -625,7 +625,7 @@ export class AddonModDataProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getDatabaseAccessInformationDataCacheKey(dataId, options.groupId),
-            component: ADDON_MOD_DATA_COMPONENT,
+            component: ADDON_MOD_DATA_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -663,8 +663,8 @@ export class AddonModDataProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getEntriesCacheKey(dataId, options.groupId),
-            updateFrequency: CoreSite.FREQUENCY_SOMETIMES,
-            component: ADDON_MOD_DATA_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.SOMETIMES,
+            component: ADDON_MOD_DATA_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -685,7 +685,7 @@ export class AddonModDataProvider {
      * @param groupId Group ID.
      * @returns Cache key.
      */
-    protected getEntriesCacheKey(dataId: number, groupId: number = 0): string {
+    protected getEntriesCacheKey(dataId: number, groupId = 0): string {
         return this.getEntriesPrefixCacheKey(dataId) + groupId;
     }
 
@@ -721,8 +721,8 @@ export class AddonModDataProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getEntryCacheKey(dataId, entryId),
-            updateFrequency: CoreSite.FREQUENCY_SOMETIMES,
-            component: ADDON_MOD_DATA_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.SOMETIMES,
+            component: ADDON_MOD_DATA_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -742,7 +742,7 @@ export class AddonModDataProvider {
      */
     protected formatEntryContents(entry: AddonModDataEntryWS): AddonModDataEntry {
         return Object.assign(entry, {
-            contents: CoreUtils.arrayToObject(entry.contents, 'fieldid'),
+            contents: CoreArray.toObject(entry.contents, 'fieldid'),
         });
     }
 
@@ -754,7 +754,7 @@ export class AddonModDataProvider {
      * @returns Cache key.
      */
     protected getEntryCacheKey(dataId: number, entryId: number): string {
-        return this.getDatabaseDataPrefixCacheKey(dataId) + ':entry:' + entryId;
+        return `${this.getDatabaseDataPrefixCacheKey(dataId)}:entry:${entryId}`;
     }
 
     /**
@@ -773,8 +773,8 @@ export class AddonModDataProvider {
 
         const preSets: CoreSiteWSPreSets = {
             cacheKey: this.getFieldsCacheKey(dataId),
-            updateFrequency: CoreSite.FREQUENCY_RARELY,
-            component: ADDON_MOD_DATA_COMPONENT,
+            updateFrequency: CoreCacheUpdateFrequency.RARELY,
+            component: ADDON_MOD_DATA_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -794,7 +794,7 @@ export class AddonModDataProvider {
      * @returns Cache key.
      */
     protected getFieldsCacheKey(dataId: number): string {
-        return this.getDatabaseDataPrefixCacheKey(dataId) + ':fields';
+        return `${this.getDatabaseDataPrefixCacheKey(dataId)}:fields`;
     }
 
     /**
@@ -804,7 +804,6 @@ export class AddonModDataProvider {
      * @param moduleId The module ID.
      * @param courseId Course ID of the module.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateContent(moduleId: number, courseId: number, siteId?: string): Promise<void> {
         siteId = siteId || CoreSites.getCurrentSiteId();
@@ -826,7 +825,7 @@ export class AddonModDataProvider {
 
         promises.push(this.invalidateFiles(moduleId, siteId));
 
-        await CoreUtils.allPromises(promises);
+        await CorePromiseUtils.allPromises(promises);
     }
 
     /**
@@ -834,7 +833,6 @@ export class AddonModDataProvider {
      *
      * @param dataId Data ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateDatabaseAccessInformationData(dataId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -847,7 +845,6 @@ export class AddonModDataProvider {
      *
      * @param dataId Data ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateEntriesData(dataId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -860,7 +857,6 @@ export class AddonModDataProvider {
      *
      * @param dataId Data ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateFieldsData(dataId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -876,7 +872,7 @@ export class AddonModDataProvider {
      * @returns Promise resolved when the files are invalidated.
      */
     async invalidateFiles(moduleId: number, siteId?: string): Promise<void> {
-        await CoreFilepool.invalidateFilesByComponent(siteId, ADDON_MOD_DATA_COMPONENT, moduleId);
+        await CoreFilepool.invalidateFilesByComponent(siteId, ADDON_MOD_DATA_COMPONENT_LEGACY, moduleId);
     }
 
     /**
@@ -884,7 +880,6 @@ export class AddonModDataProvider {
      *
      * @param courseId Course ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateDatabaseData(courseId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -897,7 +892,6 @@ export class AddonModDataProvider {
      *
      * @param databaseId Data ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateDatabaseWSData(databaseId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -911,7 +905,6 @@ export class AddonModDataProvider {
      * @param dataId Data ID for caching purposes.
      * @param entryId Entry ID.
      * @param siteId Site ID. If not defined, current site.
-     * @returns Promise resolved when the data is invalidated.
      */
     async invalidateEntryData(dataId: number, entryId: number, siteId?: string): Promise<void> {
         const site = await CoreSites.getSite(siteId);
@@ -934,7 +927,7 @@ export class AddonModDataProvider {
         await CoreCourseLogHelper.log(
             'mod_data_view_database',
             params,
-            ADDON_MOD_DATA_COMPONENT,
+            ADDON_MOD_DATA_COMPONENT_LEGACY,
             id,
             siteId,
         );
@@ -965,7 +958,7 @@ export class AddonModDataProvider {
             perpage: options.perPage,
         };
         const preSets: CoreSiteWSPreSets = {
-            component: ADDON_MOD_DATA_COMPONENT,
+            component: ADDON_MOD_DATA_COMPONENT_LEGACY,
             componentId: options.cmId,
             ...CoreSites.getReadingStrategyPreSets(options.readingStrategy), // Include reading strategy preSets.
         };
@@ -1175,14 +1168,15 @@ type AddonModDataGetDatabasesByCoursesWSResponse = {
 };
 
 /**
- * Database data returned by mod_assign_get_assignments.
+ * Database data returned by mod_data_get_databases_by_courses.
  */
 export type AddonModDataData = {
     id: number; // Database id.
     course: number; // Course id.
     name: string; // Database name.
     intro: string; // The Database intro.
-    introformat?: number; // Intro format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    introformat?: CoreTextFormat; // Intro format (1 = HTML, 0 = MOODLE, 2 = PLAIN or 4 = MARKDOWN).
+    lang: string; // Forced activity language.
     comments: boolean; // Comments enabled.
     timeavailablefrom: number; // Timeavailablefrom field.
     timeavailableto: number; // Timeavailableto field.

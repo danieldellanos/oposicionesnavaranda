@@ -15,10 +15,12 @@
 import { Injectable, Type } from '@angular/core';
 import { AddonModPage } from '../page';
 import { CoreCourseModuleHandler } from '@features/course/services/module-delegate';
-import { CoreConstants, ModPurpose } from '@/core/constants';
 import { makeSingleton } from '@singletons';
 import { CoreModuleHandlerBase } from '@features/course/classes/module-base-handler';
-import { ADDON_MOD_PAGE_PAGE_NAME } from '../../constants';
+import { ADDON_MOD_PAGE_COMPONENT, ADDON_MOD_PAGE_MODNAME, ADDON_MOD_PAGE_PAGE_NAME } from '../../constants';
+import { ModFeature, ModArchetype, ModPurpose } from '@addons/mod/constants';
+import { CoreCourseModuleData } from '@features/course/services/course-helper';
+import { CoreSitesReadingStrategy } from '@services/sites';
 
 /**
  * Handler to support page modules.
@@ -26,21 +28,21 @@ import { ADDON_MOD_PAGE_PAGE_NAME } from '../../constants';
 @Injectable({ providedIn: 'root' })
 export class AddonModPageModuleHandlerService extends CoreModuleHandlerBase implements CoreCourseModuleHandler {
 
-    name = 'AddonModPage';
-    modName = 'page';
+    name = ADDON_MOD_PAGE_COMPONENT;
+    modName = ADDON_MOD_PAGE_MODNAME;
     protected pageName = ADDON_MOD_PAGE_PAGE_NAME;
 
     supportedFeatures = {
-        [CoreConstants.FEATURE_MOD_ARCHETYPE]: CoreConstants.MOD_ARCHETYPE_RESOURCE,
-        [CoreConstants.FEATURE_GROUPS]: false,
-        [CoreConstants.FEATURE_GROUPINGS]: false,
-        [CoreConstants.FEATURE_MOD_INTRO]: true,
-        [CoreConstants.FEATURE_COMPLETION_TRACKS_VIEWS]: true,
-        [CoreConstants.FEATURE_GRADE_HAS_GRADE]: false,
-        [CoreConstants.FEATURE_GRADE_OUTCOMES]: false,
-        [CoreConstants.FEATURE_BACKUP_MOODLE2]: true,
-        [CoreConstants.FEATURE_SHOW_DESCRIPTION]: true,
-        [CoreConstants.FEATURE_MOD_PURPOSE]: ModPurpose.MOD_PURPOSE_CONTENT,
+        [ModFeature.MOD_ARCHETYPE]: ModArchetype.RESOURCE,
+        [ModFeature.GROUPS]: false,
+        [ModFeature.GROUPINGS]: false,
+        [ModFeature.MOD_INTRO]: true,
+        [ModFeature.COMPLETION_TRACKS_VIEWS]: true,
+        [ModFeature.GRADE_HAS_GRADE]: false,
+        [ModFeature.GRADE_OUTCOMES]: false,
+        [ModFeature.BACKUP_MOODLE2]: true,
+        [ModFeature.SHOW_DESCRIPTION]: true,
+        [ModFeature.MOD_PURPOSE]: ModPurpose.CONTENT,
     };
 
     /**
@@ -57,6 +59,19 @@ export class AddonModPageModuleHandlerService extends CoreModuleHandlerBase impl
         const { AddonModPageIndexComponent } = await import('../../components/index');
 
         return AddonModPageIndexComponent;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    async getModuleForcedLang(module: CoreCourseModuleData): Promise<string | undefined> {
+        const mod = await AddonModPage.getPageData(
+            module.course,
+            module.id,
+            { readingStrategy: CoreSitesReadingStrategy.PREFER_CACHE },
+        );
+
+        return mod?.lang;
     }
 
 }

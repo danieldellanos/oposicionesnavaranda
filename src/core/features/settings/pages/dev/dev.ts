@@ -13,26 +13,28 @@
 // limitations under the License.
 
 import { CoreConstants } from '@/core/constants';
-import { Component, OnInit } from '@angular/core';
+import { Component, computed, OnInit, signal } from '@angular/core';
 import {
     ALWAYS_SHOW_LOGIN_FORM,
     ALWAYS_SHOW_LOGIN_FORM_CHANGED,
     FAQ_QRCODE_INFO_DONE,
-    ONBOARDING_DONE,
 } from '@features/login/constants';
-import { CoreSettingsHelper } from '@features/settings/services/settings-helper';
-import { CoreSitePlugins } from '@features/siteplugins/services/siteplugins';
+import { CoreSettingsHelper, CoreSettingsHelperDevExtraPageItem } from '@features/settings/services/settings-helper';
 import { CoreUserTours } from '@features/usertours/services/user-tours';
 import { CoreCacheManager } from '@services/cache-manager';
 import { CoreConfig } from '@services/config';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import { CoreFile } from '@services/file';
 import { CoreNavigator } from '@services/navigator';
 import { CorePlatform } from '@services/platform';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
-import { CoreToasts, ToastDuration } from '@services/toasts';
-import { CoreText } from '@singletons/text';
+import { CoreToasts, ToastDuration } from '@services/overlays/toasts';
+import { CoreText } from '@static/text';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreLoadings } from '@services/overlays/loadings';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreSitePlugins } from '@features/siteplugins/services/siteplugins';
+import { CORE_SETTINGS_ERROR_LOG_PAGE_NAME } from '@features/settings/constants';
 
 /**
  * Page that displays the developer options.
@@ -40,8 +42,11 @@ import { CoreText } from '@singletons/text';
 @Component({
     selector: 'page-core-app-settings-dev',
     templateUrl: 'dev.html',
+    imports: [
+        CoreSharedModule,
+    ],
 })
-export class CoreSettingsDevPage implements OnInit {
+export default class CoreSettingsDevPage implements OnInit {
 
     rtl = false;
     forceSafeAreaMargins = false;
@@ -57,10 +62,23 @@ export class CoreSettingsDevPage implements OnInit {
     stagingSitesCount = 0;
     enableStagingSites?: boolean;
     previousEnableStagingSites?: boolean;
+    isAdmin = false;
+    isManager?: boolean;
 
     disabledFeatures: string[] = [];
 
     siteId: string | undefined;
+
+    token?: string;
+    privateToken?: string;
+    filesAccessKey?: string;
+
+    autoLoginTimeBetweenRequests?: number;
+    lastAutoLoginTime?: number;
+
+    readonly extraPageItems = signal<CoreSettingsHelperDevExtraPageItem[]>([]);
+    readonly wsOverrides = signal<{ method: string; count: number }[]>([]);
+    readonly totalOverrides = computed(() => this.wsOverrides().reduce((sum, override) => sum + override.count, 0));
 
     async ngOnInit(): Promise<void> {
         this.rtl = CorePlatform.isRTL;
@@ -69,9 +87,11 @@ export class CoreSettingsDevPage implements OnInit {
         this.forceSafeAreaMargins = document.documentElement.classList.contains('force-safe-area-margins');
         this.safeAreaChanged();
 
-        this.siteId = CoreSites.getCurrentSite()?.getId();
+        const currentSite = CoreSites.getCurrentSite();
+        this.siteId = currentSite?.getId();
 
         this.stagingSitesCount = CoreConstants.CONFIG.sites.filter((site) => site.staging).length;
+        this.extraPageItems.set(CoreSettingsHelper.getDevExtraPageItems());
 
         if (this.stagingSitesCount) {
             this.enableStagingSites = await CoreSettingsHelper.hasEnabledStagingSites();
@@ -79,7 +99,7 @@ export class CoreSettingsDevPage implements OnInit {
         }
         this.alwaysShowLoginForm = Boolean(await CoreConfig.get(ALWAYS_SHOW_LOGIN_FORM, 0));
 
-        if (!this.siteId) {
+        if (!currentSite) {
             return;
         }
 
@@ -91,19 +111,34 @@ export class CoreSettingsDevPage implements OnInit {
 
         this.userToursEnabled = !CoreUserTours.isDisabled();
 
+        const privateToken = currentSite.getPrivateToken();
+        const filesAccessKey = currentSite.getFilesAccessKey();
+        this.token = `...${currentSite.getToken().slice(-3)}`;
+        this.privateToken = privateToken && (`...${privateToken.slice(-3)}`);
+        this.filesAccessKey = filesAccessKey && (`...${filesAccessKey.slice(-3)}`);
+
+        this.autoLoginTimeBetweenRequests = await currentSite.getAutoLoginMinTimeBetweenRequests();
+        this.lastAutoLoginTime = currentSite.getLastAutoLoginTime();
+
+        this.isAdmin = currentSite.isAdmin();
+        // Check isManager only if LMS version is >= 5.2 because the function works properly since that version.
+        if (currentSite.isVersionGreaterEqualThan('5.2')) {
+            this.isManager = currentSite.isManager();
+        }
+
         document.head.querySelectorAll('style').forEach((style) => {
             if (this.siteId && style.id.endsWith(this.siteId)) {
                 if (style.innerHTML.length > 0) {
                     this.remoteStylesCount++;
                 }
-                this.remoteStyles = this.remoteStyles || style.getAttribute('media') != 'disabled';
+                this.remoteStyles = this.remoteStyles || style.getAttribute('media') !== 'disabled';
             }
 
             if (style.id.startsWith('siteplugin-')) {
                 if (style.innerHTML.length > 0) {
                     this.pluginStylesCount++;
                 }
-                this.pluginStyles = this.pluginStyles || style.getAttribute('media') != 'disabled';
+                this.pluginStyles = this.pluginStyles || style.getAttribute('media') !== 'disabled';
             }
         });
 
@@ -113,9 +148,14 @@ export class CoreSettingsDevPage implements OnInit {
             version: plugin.version,
         }));
 
-        const disabledFeatures = (await CoreSites.getCurrentSite()?.getPublicConfig())?.tool_mobile_disabledfeatures;
+        this.disabledFeatures = currentSite.getDisabledFeatures().split(',').filter(feature => feature.trim().length > 0) ?? [];
 
-        this.disabledFeatures = disabledFeatures?.split(',').filter(feature => feature.trim().length > 0) ?? [];
+        const overrides = currentSite.getApplicableWSOverrides();
+
+        this.wsOverrides.set(Object.keys(overrides).map((method) => ({
+            method,
+            count: overrides[method].length,
+        })));
     }
 
     /**
@@ -176,14 +216,19 @@ export class CoreSettingsDevPage implements OnInit {
      * Open error log.
      */
     openErrorLog(): void {
-        CoreNavigator.navigate('error-log');
+        CoreNavigator.navigate(CORE_SETTINGS_ERROR_LOG_PAGE_NAME);
     }
 
     /**
      * Copies site info.
      */
     copyInfo(): void {
-        CoreText.copyToClipboard(JSON.stringify({ disabledFeatures: this.disabledFeatures, sitePlugins: this.sitePlugins }));
+        CoreText.copyToClipboard(JSON.stringify({
+            disabledFeatures: this.disabledFeatures,
+            sitePlugins: this.sitePlugins,
+            autoLoginTimeBetweenRequests: this.autoLoginTimeBetweenRequests,
+            lastAutoLoginTime: this.lastAutoLoginTime,
+        }));
     }
 
     /**
@@ -191,18 +236,16 @@ export class CoreSettingsDevPage implements OnInit {
      */
     async resetUserTours(): Promise<void> {
         await CoreUserTours.resetTours();
-
-        await CoreConfig.delete(ONBOARDING_DONE);
         await CoreConfig.delete(FAQ_QRCODE_INFO_DONE);
 
-        CoreToasts.show({ message: 'User tours have been reseted' });
+        CoreToasts.show({ message: 'User tours have been reset' });
     }
 
     /**
      * Invalidate app caches.
      */
     async invalidateCaches(): Promise<void> {
-        const success = await CoreDomUtils.showOperationModals('Invalidating caches', false, async () => {
+        const success = await CoreLoadings.showOperationModals('Invalidating caches', false, async () => {
             await CoreCacheManager.invalidate();
 
             return true;
@@ -239,8 +282,17 @@ export class CoreSettingsDevPage implements OnInit {
             this.previousEnableStagingSites = enabled;
         } catch (error) {
             this.enableStagingSites = !enabled;
-            CoreDomUtils.showErrorModal(error);
+            CoreAlerts.showError(error);
         }
+    }
+
+    /**
+     * Open an extra item's page.
+     *
+     * @param item Item to open.
+     */
+    openExtraItem(item: CoreSettingsHelperDevExtraPageItem): void {
+        CoreNavigator.navigate(item.page, { params: item.pageParams });
     }
 
 }

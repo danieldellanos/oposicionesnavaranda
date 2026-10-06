@@ -14,49 +14,60 @@
     </ion-toolbar>
 </ion-header>
 <ion-content>
+    <ion-refresher slot="fixed" [disabled]="!hasComponentHandlers" (ionRefresh)="refreshData($event.target)">
+        <ion-refresher-content pullingText="{{ 'core.pulltorefresh' | translate }}" />
+    </ion-refresher>
     <ion-list>
-        <ion-item class="ion-text-center" *ngIf="(!handlers || !handlers.length) && !handlersLoaded">
-            <ion-label>
-                <ion-spinner [attr.aria-label]="'core.loading' | translate" />
-            </ion-label>
-        </ion-item>
-        <ion-item button *ngFor="let handler of handlers" [ngClass]="['core-moremenu-handler', handler.class || '']"
-            (click)="openHandler(handler)" [attr.aria-label]="handler.title | translate" [detail]="true">
-            <ion-icon [name]="handler.icon" slot="start" aria-hidden="true" />
-            <ion-label>
-                <p class="item-heading">{{ handler.title | translate}}</p>
-            </ion-label>
-            <ion-badge slot="end" *ngIf="handler.showBadge" [hidden]="handler.loading || !handler.badge" aria-hidden="true">
-                {{handler.badge}}
-            </ion-badge>
-            <span *ngIf="handler.showBadge && handler.badge && handler.badgeA11yText" class="sr-only">
-                {{ handler.badgeA11yText | translate: {$a : handler.badge } }}
-            </span>
-            <ion-spinner slot="end" *ngIf="handler.showBadge && handler.loading" [attr.aria-label]="'core.loading' | translate" />
-        </ion-item>
-        <ng-container *ngFor="let item of customItems">
-            <ion-item button *ngIf="item.type !== 'embedded'" [href]="item.url" [attr.aria-label]="item.label" core-link
-                [capture]="item.type === 'app'" [inApp]="item.type === 'inappbrowser'" class="core-moremenu-customitem" [detail]="true"
-                [detailIcon]="item.type === 'browser' ? 'open-outline' : 'chevron-forward'">
-                <ion-icon [name]="item.icon" slot="start" aria-hidden="true" />
+        @if ((!handlers || !handlers.length) && !handlersLoaded) {
+            <ion-item class="ion-text-center">
                 <ion-label>
-                    <p class="item-heading">{{item.label}}</p>
+                    <ion-spinner [attr.aria-label]="'core.loading' | translate" />
                 </ion-label>
             </ion-item>
-            <ion-item button *ngIf="item.type === 'embedded'" (click)="openItem(item)" [attr.aria-label]="item.label"
-                class="core-moremenu-customitem" [detail]="true">
-                <ion-icon [name]="item.icon" slot="start" aria-hidden="true" />
+        }
+
+        @for (handler of handlers; track handler.name) {
+            @if ('component' in handler) {
+                <core-dynamic-component [component]="handler.component" [data]="handler.componentData" />
+            } @else {
+                <ion-item button [class]="['core-moremenu-handler', handler.class]"
+                    (click)="openHandler(handler)" [attr.aria-label]="handler.title | translate" [detail]="true">
+                    <ion-icon [name]="handler.icon" slot="start" aria-hidden="true" />
+                    <ion-label>
+                        <p class="item-heading">{{ handler.title | translate}}</p>
+                    </ion-label>
+                    @if (handler.showBadge) {
+                        <ion-badge slot="end" [hidden]="handler.loading || !handler.badge" aria-hidden="true">
+                            {{handler.badge}}
+                        </ion-badge>
+                        @if (handler.badge && handler.badgeA11yText) {
+                            <span class="sr-only">
+                                {{ handler.badgeA11yText | translate: {$a : handler.badge } }}
+                            </span>
+                        }
+                        @if (handler.loading) {
+                            <ion-spinner slot="end" [attr.aria-label]="'core.loading' | translate" />
+                        }
+                    }
+                </ion-item>
+            }
+        }
+
+        @for (item of customItems; track item) {
+            <core-dynamic-component [component]="customMenuOverrideComponent" [data]="item">
+                <core-custom-menu-item [type]="item.type" [label]="item.label" [icon]="item.icon" [url]="item.url"
+                    [extraData]="item.extraData" />
+            </core-dynamic-component>
+        }
+
+        @if (showScanQR) {
+            <ion-item button (click)="scanQR()" [detail]="true">
+                <ion-icon name="fas-qrcode" slot="start" aria-hidden="true" />
                 <ion-label>
-                    <p class="item-heading">{{item.label}}</p>
+                    <p class="item-heading">{{ 'core.scanqr' | translate }}</p>
                 </ion-label>
             </ion-item>
-        </ng-container>
-        <ion-item button *ngIf="showScanQR" (click)="scanQR()" [detail]="true">
-            <ion-icon name="fas-qrcode" slot="start" aria-hidden="true" />
-            <ion-label>
-                <p class="item-heading">{{ 'core.scanqr' | translate }}</p>
-            </ion-label>
-        </ion-item>
+        }
     </ion-list>
 </ion-content>
 <ion-footer>

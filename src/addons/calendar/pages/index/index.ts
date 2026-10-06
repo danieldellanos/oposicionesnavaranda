@@ -12,25 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, viewChild } from '@angular/core';
 import { CoreNetwork } from '@services/network';
-import { CoreEventObserver, CoreEvents } from '@singletons/events';
+import { CoreEventObserver, CoreEvents } from '@static/events';
 import { CoreSites } from '@services/sites';
-import { CoreDomUtils } from '@services/utils/dom';
 import { CoreCoursesHelper } from '@features/courses/services/courses-helper';
-import { AddonCalendar, AddonCalendarProvider } from '../../services/calendar';
+import { AddonCalendar } from '../../services/calendar';
 import { AddonCalendarOffline } from '../../services/calendar-offline';
-import { AddonCalendarSync, AddonCalendarSyncProvider } from '../../services/calendar-sync';
+import { AddonCalendarSync } from '../../services/calendar-sync';
 import { AddonCalendarFilter, AddonCalendarHelper } from '../../services/calendar-helper';
-import { NgZone } from '@singletons';
-import { Subscription } from 'rxjs';
+import { Translate } from '@singletons';
 import { CoreEnrolledCourseData } from '@features/courses/services/courses';
 import { ActivatedRoute, Params } from '@angular/router';
 import { AddonCalendarCalendarComponent } from '../../components/calendar/calendar';
 import { AddonCalendarUpcomingEventsComponent } from '../../components/upcoming-events/upcoming-events';
 import { CoreNavigator } from '@services/navigator';
-import { CoreConstants } from '@/core/constants';
-import { CoreModals } from '@services/modals';
+import { CoreSyncIcon } from '@/core/constants';
+import { CoreModals } from '@services/overlays/modals';
+import {
+    ADDON_CALENDAR_AUTO_SYNCED,
+    ADDON_CALENDAR_DELETED_EVENT_EVENT,
+    ADDON_CALENDAR_EDIT_EVENT_EVENT,
+    ADDON_CALENDAR_FILTER_CHANGED_EVENT,
+    ADDON_CALENDAR_MANUAL_SYNCED,
+    ADDON_CALENDAR_NEW_EVENT_DISCARDED_EVENT,
+    ADDON_CALENDAR_NEW_EVENT_EVENT,
+    ADDON_CALENDAR_UNDELETED_EVENT_EVENT,
+} from '@addons/calendar/constants';
+import { CoreAlerts } from '@services/overlays/alerts';
+import { CoreSharedModule } from '@/core/shared.module';
+import { CoreMainMenuUserButtonComponent } from '@features/mainmenu/components/user-menu-button/user-menu-button';
+import { Subscription } from 'rxjs';
 
 /**
  * Page that displays the calendar events.
@@ -38,13 +50,20 @@ import { CoreModals } from '@services/modals';
 @Component({
     selector: 'page-addon-calendar-index',
     templateUrl: 'index.html',
+    imports: [
+        CoreSharedModule,
+        AddonCalendarCalendarComponent,
+        AddonCalendarUpcomingEventsComponent,
+        CoreMainMenuUserButtonComponent,
+    ],
 })
-export class AddonCalendarIndexPage implements OnInit, OnDestroy {
+export default class AddonCalendarIndexPage implements OnInit, OnDestroy {
 
-    @ViewChild(AddonCalendarCalendarComponent) calendarComponent?: AddonCalendarCalendarComponent;
-    @ViewChild(AddonCalendarUpcomingEventsComponent) upcomingEventsComponent?: AddonCalendarUpcomingEventsComponent;
+    readonly calendarComponent = viewChild(AddonCalendarCalendarComponent);
+    readonly upcomingEventsComponent = viewChild(AddonCalendarUpcomingEventsComponent);
 
     protected currentSiteId: string;
+    protected initialized = false;
 
     // Observers.
     protected newEventObserver?: CoreEventObserver;
@@ -54,8 +73,9 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
     protected undeleteEventObserver?: CoreEventObserver;
     protected syncObserver?: CoreEventObserver;
     protected manualSyncObserver?: CoreEventObserver;
-    protected onlineObserver?: Subscription;
     protected filterChangedObserver?: CoreEventObserver;
+    protected route = inject(ActivatedRoute);
+    protected routeSubscription?: Subscription;
 
     year?: number;
     month?: number;
@@ -63,8 +83,8 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
     courses: CoreEnrolledCourseData[] = [];
     loaded = false;
     hasOffline = false;
-    isOnline = false;
-    syncIcon = CoreConstants.ICON_LOADING;
+    readonly isOnline = CoreNetwork.onlineSignal;
+    syncIcon = CoreSyncIcon.LOADING;
     showCalendar = true;
     loadUpcoming = false;
     filter: AddonCalendarFilter = {
@@ -78,14 +98,12 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
         category: true,
     };
 
-    constructor(
-        protected route: ActivatedRoute,
-    ) {
+    constructor() {
         this.currentSiteId = CoreSites.getCurrentSiteId();
 
         // Listen for events added. When an event is added, reload the data.
         this.newEventObserver = CoreEvents.on(
-            AddonCalendarProvider.NEW_EVENT_EVENT,
+            ADDON_CALENDAR_NEW_EVENT_EVENT,
             (data) => {
                 if (data && data.eventId) {
                     this.loaded = false;
@@ -96,14 +114,14 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
         );
 
         // Listen for new event discarded event. When it does, reload the data.
-        this.discardedObserver = CoreEvents.on(AddonCalendarProvider.NEW_EVENT_DISCARDED_EVENT, () => {
+        this.discardedObserver = CoreEvents.on(ADDON_CALENDAR_NEW_EVENT_DISCARDED_EVENT, () => {
             this.loaded = false;
             this.refreshData(true, false, true);
         }, this.currentSiteId);
 
         // Listen for events edited. When an event is edited, reload the data.
         this.editEventObserver = CoreEvents.on(
-            AddonCalendarProvider.EDIT_EVENT_EVENT,
+            ADDON_CALENDAR_EDIT_EVENT_EVENT,
             (data) => {
                 if (data && data.eventId) {
                     this.loaded = false;
@@ -114,47 +132,39 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
         );
 
         // Refresh data if calendar events are synchronized automatically.
-        this.syncObserver = CoreEvents.on(AddonCalendarSyncProvider.AUTO_SYNCED, () => {
+        this.syncObserver = CoreEvents.on(ADDON_CALENDAR_AUTO_SYNCED, () => {
             this.loaded = false;
             this.refreshData(false, false, true);
         }, this.currentSiteId);
 
         // Refresh data if calendar events are synchronized manually but not by this page.
-        this.manualSyncObserver = CoreEvents.on(AddonCalendarSyncProvider.MANUAL_SYNCED, (data) => {
-            if (data && data.source != 'index') {
+        this.manualSyncObserver = CoreEvents.on(ADDON_CALENDAR_MANUAL_SYNCED, (data) => {
+            if (data && data.source !== 'index') {
                 this.loaded = false;
                 this.refreshData(false, false, true);
             }
         }, this.currentSiteId);
 
         // Update the events when an event is deleted.
-        this.deleteEventObserver = CoreEvents.on(AddonCalendarProvider.DELETED_EVENT_EVENT, () => {
+        this.deleteEventObserver = CoreEvents.on(ADDON_CALENDAR_DELETED_EVENT_EVENT, () => {
             this.loaded = false;
             this.refreshData(false, false, true);
         }, this.currentSiteId);
 
         // Update the "hasOffline" property if an event deleted in offline is restored.
-        this.undeleteEventObserver = CoreEvents.on(AddonCalendarProvider.UNDELETED_EVENT_EVENT, async () => {
+        this.undeleteEventObserver = CoreEvents.on(ADDON_CALENDAR_UNDELETED_EVENT_EVENT, async () => {
             this.hasOffline = await AddonCalendarOffline.hasOfflineData();
         }, this.currentSiteId);
 
         this.filterChangedObserver = CoreEvents.on(
-            AddonCalendarProvider.FILTER_CHANGED_EVENT,
+            ADDON_CALENDAR_FILTER_CHANGED_EVENT,
             async (filterData) => {
-                this.filter = filterData;
+                this.filter = { ...filterData };
 
                 // Course viewed has changed, check if the user can create events for this course calendar.
                 this.canCreate = await AddonCalendarHelper.canEditEvents(this.filter.courseId);
             },
         );
-
-        // Refresh online status when changes.
-        this.onlineObserver = CoreNetwork.onChange().subscribe(() => {
-            // Execute the callback in the Angular zone, so change detection doesn't stop working.
-            NgZone.run(() => {
-                this.isOnline = CoreNetwork.isOnline();
-            });
-        });
     }
 
     /**
@@ -164,7 +174,7 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
         this.loadUpcoming = !!CoreNavigator.getRouteBooleanParam('upcoming');
         this.showCalendar = !this.loadUpcoming;
 
-        this.route.queryParams.subscribe(async () => {
+        this.routeSubscription = this.route.queryParams.subscribe(() => {
             this.filter.courseId = CoreNavigator.getRouteNumberParam('courseId');
             this.year = CoreNavigator.getRouteNumberParam('year');
             this.month = CoreNavigator.getRouteNumberParam('month');
@@ -172,8 +182,9 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
 
             this.fetchData(true, false);
 
-            if (this.year !== undefined && this.month !== undefined && this.calendarComponent) {
-                this.calendarComponent.viewMonth(this.month, this.year);
+            const calendarComponent = this.calendarComponent();
+            if (this.year !== undefined && this.month !== undefined && calendarComponent) {
+                calendarComponent.viewMonth(this.month, this.year);
             }
         });
 
@@ -189,30 +200,32 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
      */
     async fetchData(sync?: boolean, showErrors?: boolean): Promise<void> {
 
-        this.syncIcon = CoreConstants.ICON_LOADING;
-        this.isOnline = CoreNetwork.isOnline();
+        this.syncIcon = CoreSyncIcon.LOADING;
+
+        let refreshComponent = false;
 
         if (sync) {
             // Try to synchronize offline events.
             try {
                 const result = await AddonCalendarSync.syncEvents();
                 if (result.warnings && result.warnings.length) {
-                    CoreDomUtils.showAlert(undefined, result.warnings[0]);
+                    CoreAlerts.show({ message: result.warnings[0] });
                 }
 
                 if (result.updated) {
                     // Trigger a manual sync event.
+                    refreshComponent = this.initialized; // Refresh component only if it was already initialized.
                     result.source = 'index';
 
                     CoreEvents.trigger(
-                        AddonCalendarSyncProvider.MANUAL_SYNCED,
+                        ADDON_CALENDAR_MANUAL_SYNCED,
                         result,
                         this.currentSiteId,
                     );
                 }
             } catch (error) {
                 if (showErrors) {
-                    CoreDomUtils.showErrorModalDefault(error, 'core.errorsync', true);
+                    CoreAlerts.showError(error, { default: Translate.instant('core.errorsync') });
                 }
             }
         }
@@ -243,13 +256,18 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
                 return;
             }));
 
+            if (refreshComponent) {
+                promises.push(this.refreshComponentData(true));
+            }
+
             await Promise.all(promises);
         } catch (error) {
-            CoreDomUtils.showErrorModalDefault(error, 'addon.calendar.errorloadevents', true);
+            CoreAlerts.showError(error, { default: Translate.instant('addon.calendar.errorloadevents') });
         }
 
         this.loaded = true;
-        this.syncIcon = CoreConstants.ICON_SYNC;
+        this.initialized = true;
+        this.syncIcon = CoreSyncIcon.SYNC;
     }
 
     /**
@@ -280,20 +298,28 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
      * @returns Promise resolved when done.
      */
     async refreshData(sync = false, showErrors = false, afterChange = false): Promise<void> {
-        this.syncIcon = CoreConstants.ICON_LOADING;
+        this.syncIcon = CoreSyncIcon.LOADING;
 
         const promises: Promise<void>[] = [];
 
         promises.push(AddonCalendar.invalidateAllowedEventTypes());
 
-        // Refresh the sub-component.
-        if (this.showCalendar && this.calendarComponent) {
-            promises.push(this.calendarComponent.refreshData(afterChange));
-        } else if (!this.showCalendar && this.upcomingEventsComponent) {
-            promises.push(this.upcomingEventsComponent.refreshData());
-        }
+        promises.push(this.refreshComponentData(afterChange));
 
         await Promise.all(promises).finally(() => this.fetchData(sync, showErrors));
+    }
+
+    /**
+     * Refresh the data of the component if loaded (either calendar or upcoming events).
+     *
+     * @param afterChange Whether the refresh is done after an event has changed or has been synced.
+     */
+    protected async refreshComponentData(afterChange = false): Promise<void> {
+        if (this.showCalendar) {
+            await this.calendarComponent()?.refreshData(afterChange);
+        } else {
+            await this.upcomingEventsComponent()?.refreshData();
+        }
     }
 
     /**
@@ -309,8 +335,11 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
      * View a certain day.
      *
      * @param data Data with the year, month and day.
+     * @param data.day Day of the month.
+     * @param data.month Month of the year.
+     * @param data.year Year.
      */
-    gotoDay(data: {day: number; month: number; year: number}): void {
+    gotoDay(data: { day: number; month: number; year: number }): void {
         const params: Params = {
             day: data.day,
             month: data.month,
@@ -385,7 +414,7 @@ export class AddonCalendarIndexPage implements OnInit, OnDestroy {
         this.syncObserver?.off();
         this.manualSyncObserver?.off();
         this.filterChangedObserver?.off();
-        this.onlineObserver?.unsubscribe();
+        this.routeSubscription?.unsubscribe();
     }
 
 }

@@ -14,18 +14,17 @@
 
 import { Injectable } from '@angular/core';
 import { FileEntry, DirectoryEntry } from '@awesome-cordova-plugins/file/ngx';
-import { Md5 } from 'ts-md5/dist/md5';
-
-import { CoreLogger } from '@singletons/logger';
-import { CoreApp } from '@services/app';
+import { Md5 } from 'ts-md5';
+import { CoreLogger } from '@static/logger';
+import { CoreAppDB } from '@services/app-db';
 import { CoreFile } from '@services/file';
-import { CoreUtils } from '@services/utils/utils';
-import { CoreMimetypeUtils } from '@services/utils/mimetype';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreMimetype } from '@static/mimetype';
 import { CoreSites } from '@services/sites';
-import { CoreEvents } from '@singletons/events';
+import { CoreEvents } from '@static/events';
 import { makeSingleton } from '@singletons';
 import { APP_SCHEMA, CoreSharedFilesDBRecord, SHARED_FILES_TABLE_NAME } from './database/sharedfiles';
-import { CorePath } from '@singletons/path';
+import { CorePath } from '@static/path';
 import { asyncInstance } from '@/core/utils/async-instance';
 import { CoreDatabaseTable } from '@classes/database/database-table';
 import { CoreDatabaseCachingStrategy, CoreDatabaseTableProxy } from '@classes/database/database-table-proxy';
@@ -51,13 +50,9 @@ export class CoreSharedFilesProvider {
      * @returns Promise resolved when done.
      */
     async initializeDatabase(): Promise<void> {
-        try {
-            await CoreApp.createTablesFromSchema(APP_SCHEMA);
-        } catch (e) {
-            // Ignore errors.
-        }
+        await CoreAppDB.createTablesFromSchema(APP_SCHEMA);
 
-        const database = CoreApp.getDB();
+        const database = CoreAppDB.getDB();
         const sharedFilesTable = new CoreDatabaseTableProxy<CoreSharedFilesDBRecord>(
             { cachingStrategy: CoreDatabaseCachingStrategy.None },
             database,
@@ -78,7 +73,7 @@ export class CoreSharedFilesProvider {
     async checkIOSNewFiles(): Promise<FileEntry | undefined> {
         this.logger.debug('Search for new files on iOS');
 
-        const entries = await CoreUtils.ignoreErrors(CoreFile.getDirectoryContents('Inbox'));
+        const entries = await CorePromiseUtils.ignoreErrors(CoreFile.getDirectoryContents('Inbox'));
 
         if (!entries || !entries.length) {
             return;
@@ -129,9 +124,9 @@ export class CoreSharedFilesProvider {
      * @returns Promise resolved when done, rejected otherwise.
      */
     async deleteInboxFile(entry: FileEntry): Promise<void> {
-        this.logger.debug('Delete inbox file: ' + entry.name);
+        this.logger.debug(`Delete inbox file: ${entry.name}`);
 
-        await CoreUtils.ignoreErrors(CoreFile.removeFileByFileEntry(entry));
+        await CorePromiseUtils.ignoreErrors(CoreFile.removeFileByFileEntry(entry));
 
         try {
             await this.unmarkAsTreated(this.getFileId(entry));
@@ -174,8 +169,8 @@ export class CoreSharedFilesProvider {
             if (mimetypes) {
                 // Get only files with the right mimetype and the ones we cannot determine the mimetype.
                 entries = entries.filter((entry) => {
-                    const extension = CoreMimetypeUtils.getFileExtension(entry.name);
-                    const mimetype = CoreMimetypeUtils.getMimeType(extension);
+                    const extension = CoreMimetype.getFileExtension(entry.name);
+                    const mimetype = CoreMimetype.getMimeType(extension);
 
                     return !mimetype || mimetypes.indexOf(mimetype) > -1;
                 });
@@ -197,7 +192,7 @@ export class CoreSharedFilesProvider {
     getSiteSharedFilesDirPath(siteId?: string): string {
         siteId = siteId || CoreSites.getCurrentSiteId();
 
-        return CoreFile.getSiteFolder(siteId) + '/' + CoreSharedFilesProvider.SHARED_FILES_FOLDER;
+        return `${CoreFile.getSiteFolder(siteId)}/${CoreSharedFilesProvider.SHARED_FILES_FOLDER}`;
     }
 
     /**
@@ -222,7 +217,7 @@ export class CoreSharedFilesProvider {
         try {
             // Check if it's already marked.
             await this.isFileTreated(fileId);
-        } catch (err) {
+        } catch {
             // Doesn't exist, insert it.
             await this.sharedFilesTable.insert({ id: fileId });
         }

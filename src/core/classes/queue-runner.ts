@@ -67,7 +67,7 @@ export type CoreQueueRunnerAddOptions = {
  */
 export class CoreQueueRunner {
 
-    protected queue: {[id: string]: CoreQueueRunnerItem} = {};
+    protected queue: { [id: string]: CoreQueueRunnerItem } = {};
     protected orderedQueue: CoreQueueRunnerItem[] = [];
     protected numberRunning = 0;
 
@@ -77,7 +77,7 @@ export class CoreQueueRunner {
      * @param maxParallel Max number of parallel executions.
      * @param usePriority If true, the queue will be ordered by priority.
      */
-    constructor(protected maxParallel: number = 1, protected usePriority = false) { }
+    constructor(protected maxParallel = 1, protected usePriority = false) { }
 
     /**
      * Get unique ID.
@@ -90,7 +90,7 @@ export class CoreQueueRunner {
         let num = 1;
 
         do {
-            newId = id + '-' + num;
+            newId = `${id}-${num}`;
             num++;
         } while (newId in this.queue);
 
