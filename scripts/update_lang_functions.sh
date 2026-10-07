@@ -96,13 +96,25 @@ function load_langpacks {
         # Clean files to allow branch changes.
         git restore --source=HEAD :/
 
-        git checkout "langpack_$LANGVERSION"
+        git remote set-branches origin "langpack_$LANGVERSION" && git fetch origin
+        if [ $? -ne 0 ]; then
+            echo "Cannot fetch language repository langpack_$LANGVERSION"
+            exit 1
+        fi
+
+        if git show-ref --verify --quiet "refs/heads/langpack_$LANGVERSION"; then
+            git checkout "langpack_$LANGVERSION"
+        else
+            git checkout -b "langpack_$LANGVERSION" --track "origin/langpack_$LANGVERSION"
+        fi
         if [ $? -ne 0 ]; then
             echo "Cannot checkout language repository langpack_$LANGVERSION"
             exit 1
         fi
 
-        git pull
+        git restore --source=HEAD :/
+
+        git pull origin "langpack_$LANGVERSION"
         if [ $? -ne 0 ]; then
             echo "Cannot pull language repository"
             exit 1
